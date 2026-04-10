@@ -2,7 +2,7 @@
   "name": "5chan-board-manager",
   "version": "0.2.3",
   "description": "4chan-style thread auto-archiving and purging for plebbit-js subplebbits",
-  "license": "GPL-3.0-only",
+  "license": "GPL-3.0-or-later",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/bitsocialhq/5chan-board-manager.git"
