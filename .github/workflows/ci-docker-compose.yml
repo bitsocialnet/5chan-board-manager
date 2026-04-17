@@ -228,7 +228,7 @@ jobs:
         run: |
           docker run -d --name 5chan-bitsocial-cli -p 9138:9138 \
             -e PLEBBIT_RPC_AUTH_KEY=ci-test-auth-key \
-            ghcr.io/bitsocialhq/bitsocial-cli:latest
+            ghcr.io/bitsocialnet/bitsocial-cli:latest
 
       - name: Wait for bitsocial RPC
         run: |
@@ -354,7 +354,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/bitsocialhq/5chan-board-manager
+          images: ghcr.io/bitsocialnet/5chan-board-manager
           tags: |
             type=semver,pattern={{version}},value=${{ steps.previoustag.outputs.tag }}
             type=semver,pattern={{major}}.{{minor}},value=${{ steps.previoustag.outputs.tag }}

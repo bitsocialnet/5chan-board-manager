@@ -5,7 +5,7 @@
   "license": "GPL-3.0-or-later",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/bitsocialhq/5chan-board-manager.git"
+    "url": "git+https://github.com/bitsocialnet/5chan-board-manager.git"
   },
   "type": "module",
   "files": [

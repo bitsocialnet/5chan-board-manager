@@ -41,7 +41,7 @@ Modified presets are validated before applying; invalid changes fail the command
 
 Note: "board add" only accepts 5chan settings flags (pagination, bump limits, archiving).
 To set board settings (title, description, rules, etc.), use a WebUI or bitsocial-cli:
-https://github.com/bitsocialhq/bitsocial-cli#bitsocial-community-edit-address`
+https://github.com/bitsocialnet/bitsocial-cli#bitsocial-community-edit-address`
 
   static override examples = [
     '5chan board add random.bso',
@@ -200,7 +200,7 @@ https://github.com/bitsocialhq/bitsocial-cli#bitsocial-community-edit-address`
           'Valid flags: --per-page, --pages, --bump-limit, --archive-purge-seconds,\n' +
           '  --apply-defaults, --skip-apply-defaults, --interactive-apply-defaults, --defaults-preset, --rpc-url\n\n' +
           'To set board settings (title, description, rules, etc.), use a WebUI or bitsocial-cli:\n' +
-          'https://github.com/bitsocialhq/bitsocial-cli#bitsocial-community-edit-address'
+          'https://github.com/bitsocialnet/bitsocial-cli#bitsocial-community-edit-address'
         )
       }
       throw err

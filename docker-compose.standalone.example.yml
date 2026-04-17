@@ -11,7 +11,7 @@
 
 services:
   5chan:
-    image: ghcr.io/bitsocialhq/5chan-board-manager:latest
+    image: ghcr.io/bitsocialnet/5chan-board-manager:latest
     container_name: 5chan
     restart: unless-stopped
     extra_hosts:

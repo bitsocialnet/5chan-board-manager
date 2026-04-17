@@ -79,10 +79,10 @@ All fields except each board's `address` are optional:
 
 #### Full stack (with bitsocial-cli)
 
-If you **don't** already have [bitsocial-cli](https://github.com/bitsocialhq/bitsocial-cli) running, use the full stack compose file which boots both bitsocial-cli (PKC RPC server) and 5chan together.:
+If you **don't** already have [bitsocial-cli](https://github.com/bitsocialnet/bitsocial-cli) running, use the full stack compose file which boots both bitsocial-cli (PKC RPC server) and 5chan together.:
 
 ```bash
-wget -O docker-compose.yml https://raw.githubusercontent.com/bitsocialhq/5chan-board-manager/master/docker-compose.example.yml
+wget -O docker-compose.yml https://raw.githubusercontent.com/bitsocialnet/5chan-board-manager/master/docker-compose.example.yml
 # Add boards via 5chan board add (see Config Directory Layout above)
 docker compose up -d
 ```
@@ -101,7 +101,7 @@ Use this flow to create a new board with `bitsocial-cli` and immediately add it 
 > **Note:** The container starts gracefully even with no boards configured — it waits for boards to be added and picks them up automatically via config hot-reload.
 
 ```bash
-wget -O docker-compose.yml https://raw.githubusercontent.com/bitsocialhq/5chan-board-manager/master/docker-compose.example.yml
+wget -O docker-compose.yml https://raw.githubusercontent.com/bitsocialnet/5chan-board-manager/master/docker-compose.example.yml
 docker compose up -d
 
 # Create a community (copy the created address from output)
@@ -255,7 +255,7 @@ DESCRIPTION
 
   Note: "board add" only accepts 5chan settings flags (pagination, bump limits, archiving).
   To set board settings (title, description, rules, etc.), use a WebUI or bitsocial-cli:
-  https://github.com/bitsocialhq/bitsocial-cli#bitsocial-community-edit-address
+  https://github.com/bitsocialnet/bitsocial-cli#bitsocial-community-edit-address
 
 EXAMPLES
   $ 5chan board add random.bso
@@ -275,7 +275,7 @@ EXAMPLES
   $ 5chan board add my-board.bso --apply-defaults --defaults-preset ./my-preset.json
 ```
 
-_See code: [src/commands/board/add.ts](https://github.com/bitsocialhq/5chan-board-manager/blob/v0.2.3/src/commands/board/add.ts)_
+_See code: [src/commands/board/add.ts](https://github.com/bitsocialnet/5chan-board-manager/blob/v0.2.3/src/commands/board/add.ts)_
 
 ## `5chan board edit ADDRESS`
 
@@ -304,7 +304,7 @@ DESCRIPTION
   This command configures how 5chan manages the board (pagination, bump limits, archiving).
   Use --interactive (-i) to open the board config in $EDITOR for direct viewing/editing.
   To edit board settings (title, description, rules, etc.), use a WebUI or bitsocial-cli:
-  https://github.com/bitsocialhq/bitsocial-cli#bitsocial-community-edit-address
+  https://github.com/bitsocialnet/bitsocial-cli#bitsocial-community-edit-address
 
 EXAMPLES
   $ 5chan board edit tech.bso --bump-limit 500
@@ -322,7 +322,7 @@ EXAMPLES
   $ 5chan board edit random.bso -i
 ```
 
-_See code: [src/commands/board/edit.ts](https://github.com/bitsocialhq/5chan-board-manager/blob/v0.2.3/src/commands/board/edit.ts)_
+_See code: [src/commands/board/edit.ts](https://github.com/bitsocialnet/5chan-board-manager/blob/v0.2.3/src/commands/board/edit.ts)_
 
 ## `5chan board list`
 
@@ -339,7 +339,7 @@ EXAMPLES
   $ 5chan board list
 ```
 
-_See code: [src/commands/board/list.ts](https://github.com/bitsocialhq/5chan-board-manager/blob/v0.2.3/src/commands/board/list.ts)_
+_See code: [src/commands/board/list.ts](https://github.com/bitsocialnet/5chan-board-manager/blob/v0.2.3/src/commands/board/list.ts)_
 
 ## `5chan board remove ADDRESS`
 
@@ -359,7 +359,7 @@ EXAMPLES
   $ 5chan board remove random.bso
 ```
 
-_See code: [src/commands/board/remove.ts](https://github.com/bitsocialhq/5chan-board-manager/blob/v0.2.3/src/commands/board/remove.ts)_
+_See code: [src/commands/board/remove.ts](https://github.com/bitsocialnet/5chan-board-manager/blob/v0.2.3/src/commands/board/remove.ts)_
 
 ## `5chan defaults set`
 
@@ -399,7 +399,7 @@ EXAMPLES
   $ 5chan defaults set -i
 ```
 
-_See code: [src/commands/defaults/set.ts](https://github.com/bitsocialhq/5chan-board-manager/blob/v0.2.3/src/commands/defaults/set.ts)_
+_See code: [src/commands/defaults/set.ts](https://github.com/bitsocialnet/5chan-board-manager/blob/v0.2.3/src/commands/defaults/set.ts)_
 
 ## `5chan help [COMMAND]`
 
@@ -450,7 +450,7 @@ EXAMPLES
   $ 5chan start --config-dir /path/to/config
 ```
 
-_See code: [src/commands/start.ts](https://github.com/bitsocialhq/5chan-board-manager/blob/v0.2.3/src/commands/start.ts)_
+_See code: [src/commands/start.ts](https://github.com/bitsocialnet/5chan-board-manager/blob/v0.2.3/src/commands/start.ts)_
 <!-- commandsstop -->
 
 ## Config Hot-Reload

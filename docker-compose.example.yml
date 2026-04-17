@@ -10,7 +10,7 @@
 
 services:
   bitsocial:
-    image: ghcr.io/bitsocialhq/bitsocial-cli:latest
+    image: ghcr.io/bitsocialnet/bitsocial-cli:latest
     container_name: 5chan-bitsocial-cli
     restart: unless-stopped
     ports:
@@ -35,7 +35,7 @@ services:
       retries: 3
 
   5chan:
-    image: ghcr.io/bitsocialhq/5chan-board-manager:latest
+    image: ghcr.io/bitsocialnet/5chan-board-manager:latest
     container_name: 5chan
     restart: unless-stopped
     depends_on:

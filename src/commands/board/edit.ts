@@ -27,7 +27,7 @@ export default class BoardEdit extends Command {
 This command configures how 5chan manages the board (pagination, bump limits, archiving).
 Use --interactive (-i) to open the board config in $EDITOR for direct viewing/editing.
 To edit board settings (title, description, rules, etc.), use a WebUI or bitsocial-cli:
-https://github.com/bitsocialhq/bitsocial-cli#bitsocial-community-edit-address`
+https://github.com/bitsocialnet/bitsocial-cli#bitsocial-community-edit-address`
 
   static override examples = [
     '5chan board edit tech.bso --bump-limit 500',
@@ -72,7 +72,7 @@ https://github.com/bitsocialhq/bitsocial-cli#bitsocial-community-edit-address`
           '"board edit" only manages 5chan settings (pagination, bump limits, archiving).\n' +
           'Valid flags: --per-page, --pages, --bump-limit, --archive-purge-seconds, --reset, --interactive\n\n' +
           'To edit board settings (title, description, rules, etc.), use a WebUI or bitsocial-cli:\n' +
-          'https://github.com/bitsocialhq/bitsocial-cli#bitsocial-community-edit-address'
+          'https://github.com/bitsocialnet/bitsocial-cli#bitsocial-community-edit-address'
         )
       }
       throw err
