@@ -4,7 +4,7 @@ import { join, dirname } from 'node:path'
 import { loadState, saveState, acquireLock } from './state.js'
 import type { BoardManagerOptions, BoardManagerResult, BoardManagerState, Comment, FileLock, ModerationReasons, Community, Signer, ThreadComment, Page } from './types.js'
 
-const log = Logger('5chan:board-manager:archiver')
+const log = Logger('bitsocial:5chan-board-manager:archiver')
 
 const DEFAULTS = {
   perPage: 15,

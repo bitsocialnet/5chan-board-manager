@@ -5,7 +5,7 @@ import { startBoardManager } from './board-manager.js'
 import { resolveBoardManagerOptions } from './multi-config.js'
 import type { BoardManagerResult, MultiBoardConfig, MultiBoardResult } from './types.js'
 
-const log = Logger('5chan:board-manager:multi')
+const log = Logger('bitsocial:5chan-board-manager:multi')
 
 /**
  * Start board managers for all boards in the config.

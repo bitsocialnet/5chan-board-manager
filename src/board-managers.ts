@@ -6,7 +6,7 @@ import { loadConfig, globalConfigPath, renameBoardConfig } from './config-manage
 import { resolveBoardManagerOptions } from './multi-config.js'
 import type { BoardManagerResult, MultiBoardConfig } from './types.js'
 
-const log = Logger('5chan:board-manager')
+const log = Logger('bitsocial:5chan-board-manager')
 
 export interface BoardManagers {
   readonly boardManagers: ReadonlyMap<string, BoardManagerResult>
