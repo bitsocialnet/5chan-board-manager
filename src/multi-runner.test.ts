@@ -54,8 +54,8 @@ describe('startMultiBoardManager', () => {
     await startMultiBoardManager(config, '/test/config')
 
     const opts = mockStartBoardManager.mock.calls[0][0] as BoardManagerOptions
-    expect(opts.subplebbitAddress).toBe('x.bso')
-    expect(opts.plebbitRpcUrl).toBe('ws://test:9138')
+    expect(opts.communityAddress).toBe('x.bso')
+    expect(opts.pkcRpcUrl).toBe('ws://test:9138')
     expect(opts.boardDir).toBe(join('/test/config', 'boards', 'x.bso'))
     expect(opts.perPage).toBe(20)
     expect(opts.bumpLimit).toBe(500)
@@ -100,7 +100,7 @@ describe('startMultiBoardManager', () => {
     const order: string[] = []
 
     mockStartBoardManager.mockImplementation(async (opts: BoardManagerOptions) => {
-      order.push(opts.subplebbitAddress)
+      order.push(opts.communityAddress)
       return { stop: makeStopFn() }
     })
 

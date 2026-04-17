@@ -1,6 +1,6 @@
 import { watch, mkdirSync, type FSWatcher } from 'node:fs'
 import { join } from 'node:path'
-import Logger from '@plebbit/plebbit-logger'
+import Logger from '@pkcprotocol/pkc-logger'
 import { startBoardManager } from './board-manager.js'
 import { loadConfig, globalConfigPath, renameBoardConfig } from './config-manager.js'
 import { resolveBoardManagerOptions } from './multi-config.js'

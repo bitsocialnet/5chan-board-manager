@@ -3,14 +3,14 @@ import { mkdtempSync, mkdirSync, rmSync, existsSync, writeFileSync, renameSync }
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { loadState, saveState } from './state.js'
-import type { BoardManagerState, PlebbitInstance, Page, ThreadComment } from './types.js'
+import type { BoardManagerState, PKCInstance, Page, ThreadComment } from './types.js'
 import { startBoardManager } from './board-manager.js'
 
-vi.mock('./plebbit-rpc.js', () => ({
-  connectToPlebbitRpc: vi.fn(),
+vi.mock('./pkc-rpc.js', () => ({
+  connectToPkcRpc: vi.fn(),
 }))
 
-import { connectToPlebbitRpc } from './plebbit-rpc.js'
+import { connectToPkcRpc } from './pkc-rpc.js'
 
 // Helper to create a mock thread
 function mockThread(cid: string, overrides: Record<string, unknown> = {}): ThreadComment {
@@ -20,19 +20,19 @@ function mockThread(cid: string, overrides: Record<string, unknown> = {}): Threa
 interface MockModerationRecord {
   commentCid: string
   commentModeration: { archived?: boolean; purged?: boolean; reason?: string }
-  subplebbitAddress: string
+  communityAddress: string
   signer: { address: string; privateKey: string; type: 'ed25519' }
 }
 
-// Helper to create a mock plebbit instance (RPC-only, no dataPath)
-function createMockPlebbit() {
+// Helper to create a mock PKC instance (RPC-only, no dataPath)
+function createMockPKC() {
   const mockSigner = { address: 'mock-address-123', privateKey: 'mock-pk-123' }
   const publishedModerations: MockModerationRecord[] = []
 
   const instance = {
     createSigner: vi.fn().mockResolvedValue({ ...mockSigner }),
-    getSubplebbit: vi.fn(),
-    subplebbits: [] as string[],
+    getCommunity: vi.fn(),
+    communities: [] as string[],
     createCommentModeration: vi.fn().mockImplementation((opts: MockModerationRecord) => ({
       ...opts,
       publish: vi.fn().mockImplementation(async () => {
@@ -40,9 +40,9 @@ function createMockPlebbit() {
       }),
     })),
     destroy: vi.fn().mockResolvedValue(undefined),
-  } as unknown as PlebbitInstance
+  } as unknown as PKCInstance
 
-  vi.mocked(connectToPlebbitRpc).mockResolvedValue(instance)
+  vi.mocked(connectToPkcRpc).mockResolvedValue(instance)
 
   return {
     instance,
@@ -51,8 +51,8 @@ function createMockPlebbit() {
   }
 }
 
-// Helper to create a mock subplebbit with posts configuration
-function createMockSubplebbit(postsConfig: {
+// Helper to create a mock community with posts configuration
+function createMockCommunity(postsConfig: {
   pageCids?: Partial<Record<string, string>>
   pages?: Partial<Record<string, Page>>
   getPage?: (args: { cid: string }) => Promise<Page>
@@ -284,7 +284,7 @@ describe('board manager logic', () => {
       expect(loaded.signers['board.bso'].privateKey).toBe('existing-key')
     })
 
-    it('handles multiple signers for different subplebbits', () => {
+    it('handles multiple signers for different communities', () => {
       const filePath = join(dir, 'test-state.json')
       const state: BoardManagerState = {
         signers: {
@@ -338,39 +338,39 @@ describe('board manager logic', () => {
 
   describe('createCommentModeration mock', () => {
     it('creates archive moderation with correct shape', async () => {
-      const { instance } = createMockPlebbit()
+      const { instance } = createMockPKC()
       const mod = await instance.createCommentModeration({
         commentCid: 'QmTest',
         commentModeration: { archived: true },
-        subplebbitAddress: 'board.bso',
+        communityAddress: 'board.bso',
         signer: { address: 'addr', privateKey: 'pk', type: 'ed25519' },
       })
       expect(instance.createCommentModeration).toHaveBeenCalledWith({
         commentCid: 'QmTest',
         commentModeration: { archived: true },
-        subplebbitAddress: 'board.bso',
+        communityAddress: 'board.bso',
         signer: { address: 'addr', privateKey: 'pk', type: 'ed25519' },
       })
       expect(mod.publish).toBeDefined()
     })
 
     it('creates purge moderation with correct shape', async () => {
-      const { instance } = createMockPlebbit()
+      const { instance } = createMockPKC()
       const mod = await instance.createCommentModeration({
         commentCid: 'QmTest',
         commentModeration: { purged: true },
-        subplebbitAddress: 'board.bso',
+        communityAddress: 'board.bso',
         signer: { address: 'addr', privateKey: 'pk', type: 'ed25519' },
       })
       expect(mod.commentModeration.purged).toBe(true)
     })
 
     it('tracks published moderations', async () => {
-      const { instance, publishedModerations } = createMockPlebbit()
+      const { instance, publishedModerations } = createMockPKC()
       const mod = await instance.createCommentModeration({
         commentCid: 'QmTest',
         commentModeration: { archived: true },
-        subplebbitAddress: 'board.bso',
+        communityAddress: 'board.bso',
         signer: { address: 'addr', privateKey: 'pk', type: 'ed25519' },
       })
       await mod.publish()
@@ -380,17 +380,17 @@ describe('board manager logic', () => {
   })
 
   describe('thread fetching scenarios', () => {
-    it('returns early when subplebbit has no posts', async () => {
-      const { instance, publishedModerations } = createMockPlebbit()
-      const mockSub = createMockSubplebbit({
+    it('returns early when community has no posts', async () => {
+      const { instance, publishedModerations } = createMockPKC()
+      const mockSub = createMockCommunity({
         pageCids: {},
         pages: {},
       })
-      vi.mocked(instance.getSubplebbit).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PlebbitInstance['getSubplebbit']>>)
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       const boardManager = await startBoardManager({
-        subplebbitAddress: 'board.bso',
-        plebbitRpcUrl: 'ws://localhost:9138',
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
         boardDir: boardDir,
         perPage: 15,
         pages: 10,
@@ -402,23 +402,23 @@ describe('board manager logic', () => {
     })
 
     it('fetches all threads via pageCids.active with single page', async () => {
-      const { instance, publishedModerations } = createMockPlebbit()
+      const { instance, publishedModerations } = createMockPKC()
       const threadsOnPage = Array.from({ length: 5 }, (_, i) => mockThread(`QmActive${i}`))
       const getPage = vi.fn().mockResolvedValue({
         comments: threadsOnPage,
         nextCid: undefined,
       } as Page)
 
-      const mockSub = createMockSubplebbit({
+      const mockSub = createMockCommunity({
         pageCids: { active: 'QmActivePage1' },
         pages: {},
         getPage,
       })
-      vi.mocked(instance.getSubplebbit).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PlebbitInstance['getSubplebbit']>>)
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       const boardManager = await startBoardManager({
-        subplebbitAddress: 'board.bso',
-        plebbitRpcUrl: 'ws://localhost:9138',
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
         boardDir: boardDir,
         perPage: 2,
         pages: 1, // capacity = 2, so 3 threads should get archived
@@ -437,7 +437,7 @@ describe('board manager logic', () => {
     })
 
     it('paginates via nextCid when multiple pages exist', async () => {
-      const { instance, publishedModerations } = createMockPlebbit()
+      const { instance, publishedModerations } = createMockPKC()
       const page1Threads = [mockThread('QmP1a'), mockThread('QmP1b')]
       const page2Threads = [mockThread('QmP2a'), mockThread('QmP2b')]
 
@@ -445,16 +445,16 @@ describe('board manager logic', () => {
         .mockResolvedValueOnce({ comments: page1Threads, nextCid: 'QmPage2Cid' } as Page)
         .mockResolvedValueOnce({ comments: page2Threads, nextCid: undefined } as Page)
 
-      const mockSub = createMockSubplebbit({
+      const mockSub = createMockCommunity({
         pageCids: { active: 'QmPage1Cid' },
         pages: {},
         getPage,
       })
-      vi.mocked(instance.getSubplebbit).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PlebbitInstance['getSubplebbit']>>)
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       const boardManager = await startBoardManager({
-        subplebbitAddress: 'board.bso',
-        plebbitRpcUrl: 'ws://localhost:9138',
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
         boardDir: boardDir,
         perPage: 1,
         pages: 1, // capacity = 1, so 3 threads should get archived
@@ -476,7 +476,7 @@ describe('board manager logic', () => {
     })
 
     it('falls back to preloaded hot page when pageCids.active is absent', async () => {
-      const { instance, publishedModerations } = createMockPlebbit()
+      const { instance, publishedModerations } = createMockPKC()
       // Threads with lastReplyTimestamp so active sort is deterministic
       const hotThreads = [
         mockThread('QmHot0', { lastReplyTimestamp: 400, postNumber: 1 }),
@@ -485,17 +485,17 @@ describe('board manager logic', () => {
         mockThread('QmHot3', { lastReplyTimestamp: 100, postNumber: 4 }),
       ]
 
-      const mockSub = createMockSubplebbit({
+      const mockSub = createMockCommunity({
         pageCids: {}, // no active pageCid
         pages: {
           hot: { comments: hotThreads, nextCid: undefined } as Page,
         },
       })
-      vi.mocked(instance.getSubplebbit).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PlebbitInstance['getSubplebbit']>>)
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       const boardManager = await startBoardManager({
-        subplebbitAddress: 'board.bso',
-        plebbitRpcUrl: 'ws://localhost:9138',
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
         boardDir: boardDir,
         perPage: 1,
         pages: 2, // capacity = 2, so 2 threads should get archived
@@ -513,7 +513,7 @@ describe('board manager logic', () => {
     })
 
     it('paginates hot pages via nextCid when pageCids.active is absent', async () => {
-      const { instance, publishedModerations } = createMockPlebbit()
+      const { instance, publishedModerations } = createMockPKC()
       // Page 1 (preloaded): newer threads
       const page1Threads = [
         mockThread('QmH1', { lastReplyTimestamp: 500, postNumber: 10 }),
@@ -530,18 +530,18 @@ describe('board manager logic', () => {
         nextCid: undefined,
       } as Page)
 
-      const mockSub = createMockSubplebbit({
+      const mockSub = createMockCommunity({
         pageCids: {}, // no active pageCid
         pages: {
           hot: { comments: page1Threads, nextCid: 'QmHotPage2' } as Page,
         },
         getPage,
       })
-      vi.mocked(instance.getSubplebbit).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PlebbitInstance['getSubplebbit']>>)
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       const boardManager = await startBoardManager({
-        subplebbitAddress: 'board.bso',
-        plebbitRpcUrl: 'ws://localhost:9138',
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
         boardDir: boardDir,
         perPage: 1,
         pages: 1, // capacity = 1, so 3 threads archived
@@ -560,44 +560,44 @@ describe('board manager logic', () => {
       await boardManager.stop()
     })
 
-    it('throws for remote subplebbit when signer has no mod role', async () => {
-      const { instance } = createMockPlebbit()
-      // subplebbits is empty → board.bso is remote
-      ;(instance as unknown as { subplebbits: string[] }).subplebbits = []
+    it('throws for remote community when signer has no mod role', async () => {
+      const { instance } = createMockPKC()
+      // communities is empty → board.bso is remote
+      ;(instance as unknown as { communities: string[] }).communities = []
 
-      const mockSub = createMockSubplebbit({
+      const mockSub = createMockCommunity({
         pageCids: {},
         pages: {},
       })
       // Signer has no role
       ;(mockSub as unknown as { roles: Record<string, unknown> }).roles = {}
-      vi.mocked(instance.getSubplebbit).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PlebbitInstance['getSubplebbit']>>)
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       await expect(startBoardManager({
-        subplebbitAddress: 'board.bso',
-        plebbitRpcUrl: 'ws://localhost:9138',
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
         boardDir: boardDir,
       })).rejects.toThrow(
-        'Signer mock-address-123 does not have a moderator role on remote subplebbit board.bso. Ask the subplebbit owner to add this address as a moderator.'
+        'Signer mock-address-123 does not have a moderator role on remote community board.bso. Ask the community owner to add this address as a moderator.'
       )
     })
 
-    it('starts successfully for remote subplebbit when signer has mod role', async () => {
-      const { instance } = createMockPlebbit()
-      // subplebbits is empty → board.bso is remote
-      ;(instance as unknown as { subplebbits: string[] }).subplebbits = []
+    it('starts successfully for remote community when signer has mod role', async () => {
+      const { instance } = createMockPKC()
+      // communities is empty → board.bso is remote
+      ;(instance as unknown as { communities: string[] }).communities = []
 
-      const mockSub = createMockSubplebbit({
+      const mockSub = createMockCommunity({
         pageCids: {},
         pages: {},
       })
       // Signer already has moderator role
       mockSub.roles = { 'mock-address-123': { role: 'moderator' as const } }
-      vi.mocked(instance.getSubplebbit).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PlebbitInstance['getSubplebbit']>>)
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       const boardManager = await startBoardManager({
-        subplebbitAddress: 'board.bso',
-        plebbitRpcUrl: 'ws://localhost:9138',
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
         boardDir: boardDir,
       })
 
@@ -606,22 +606,22 @@ describe('board manager logic', () => {
       await boardManager.stop()
     })
 
-    it('auto-grants mod role for local subplebbit without mod role', async () => {
-      const { instance } = createMockPlebbit()
-      // subplebbits includes board.bso → it's local
-      ;(instance as unknown as { subplebbits: string[] }).subplebbits = ['board.bso']
+    it('auto-grants mod role for local community without mod role', async () => {
+      const { instance } = createMockPKC()
+      // communities includes board.bso → it's local
+      ;(instance as unknown as { communities: string[] }).communities = ['board.bso']
 
-      const mockSub = createMockSubplebbit({
+      const mockSub = createMockCommunity({
         pageCids: {},
         pages: {},
       })
       // Signer has no role
       ;(mockSub as unknown as { roles: Record<string, unknown> }).roles = {}
-      vi.mocked(instance.getSubplebbit).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PlebbitInstance['getSubplebbit']>>)
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       const boardManager = await startBoardManager({
-        subplebbitAddress: 'board.bso',
-        plebbitRpcUrl: 'ws://localhost:9138',
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
         boardDir: boardDir,
       })
 
@@ -636,7 +636,7 @@ describe('board manager logic', () => {
 
   describe('update serialization', () => {
     it('serializes concurrent update events', async () => {
-      const { instance } = createMockPlebbit()
+      const { instance } = createMockPKC()
 
       // Use a deferred promise to block getPage so we can control timing
       let resolveGetPage: ((value: Page) => void) | undefined
@@ -650,16 +650,16 @@ describe('board manager logic', () => {
 
       const threads = [mockThread('Qm1'), mockThread('Qm2'), mockThread('Qm3')]
 
-      const mockSub = createMockSubplebbit({
+      const mockSub = createMockCommunity({
         pageCids: { active: 'QmPage1' },
         pages: {},
         getPage,
       })
-      vi.mocked(instance.getSubplebbit).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PlebbitInstance['getSubplebbit']>>)
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       const boardManager = await startBoardManager({
-        subplebbitAddress: 'board.bso',
-        plebbitRpcUrl: 'ws://localhost:9138',
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
         boardDir: boardDir,
         perPage: 15,
         pages: 10,
@@ -698,29 +698,29 @@ describe('board manager logic', () => {
     })
 
     it('does not re-run when no update arrives during handleUpdate', async () => {
-      const { instance } = createMockPlebbit()
+      const { instance } = createMockPKC()
       const getPageCalls: string[] = []
       const getPage = vi.fn().mockImplementation(({ cid }: { cid: string }) => {
         getPageCalls.push(cid)
         return Promise.resolve({ comments: [mockThread('Qm1')], nextCid: undefined } as Page)
       })
 
-      const mockSub = createMockSubplebbit({
+      const mockSub = createMockCommunity({
         pageCids: { active: 'QmPage1' },
         pages: {},
         getPage,
       })
-      vi.mocked(instance.getSubplebbit).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PlebbitInstance['getSubplebbit']>>)
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       const boardManager = await startBoardManager({
-        subplebbitAddress: 'board.bso',
-        plebbitRpcUrl: 'ws://localhost:9138',
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
         boardDir: boardDir,
         perPage: 15,
         pages: 10,
       })
 
-      // The initial update from subplebbit.update() triggers one handleUpdate
+      // The initial update from community.update() triggers one handleUpdate
       await vi.waitFor(() => {
         expect(getPageCalls).toHaveLength(1)
       })
@@ -738,13 +738,13 @@ describe('board manager logic', () => {
       const lockPath = join(boardDir, 'state.json.lock')
       writeFileSync(lockPath, String(process.pid))
 
-      const { instance } = createMockPlebbit()
-      const mockSub = createMockSubplebbit({ pageCids: {}, pages: {} })
-      vi.mocked(instance.getSubplebbit).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PlebbitInstance['getSubplebbit']>>)
+      const { instance } = createMockPKC()
+      const mockSub = createMockCommunity({ pageCids: {}, pages: {} })
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       await expect(startBoardManager({
-        subplebbitAddress: 'board.bso',
-        plebbitRpcUrl: 'ws://localhost:9138',
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
         boardDir: boardDir,
       })).rejects.toThrow(`Another board manager (PID ${process.pid}) is already running for board.bso`)
     })
@@ -753,13 +753,13 @@ describe('board manager logic', () => {
       const lockPath = join(boardDir, 'state.json.lock')
       writeFileSync(lockPath, '999999')
 
-      const { instance } = createMockPlebbit()
-      const mockSub = createMockSubplebbit({ pageCids: {}, pages: {} })
-      vi.mocked(instance.getSubplebbit).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PlebbitInstance['getSubplebbit']>>)
+      const { instance } = createMockPKC()
+      const mockSub = createMockCommunity({ pageCids: {}, pages: {} })
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       const boardManager = await startBoardManager({
-        subplebbitAddress: 'board.bso',
-        plebbitRpcUrl: 'ws://localhost:9138',
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
         boardDir: boardDir,
       })
 
@@ -768,13 +768,13 @@ describe('board manager logic', () => {
     })
 
     it('releases lock on stop()', async () => {
-      const { instance } = createMockPlebbit()
-      const mockSub = createMockSubplebbit({ pageCids: {}, pages: {} })
-      vi.mocked(instance.getSubplebbit).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PlebbitInstance['getSubplebbit']>>)
+      const { instance } = createMockPKC()
+      const mockSub = createMockCommunity({ pageCids: {}, pages: {} })
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       const boardManager = await startBoardManager({
-        subplebbitAddress: 'board.bso',
-        plebbitRpcUrl: 'ws://localhost:9138',
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
         boardDir: boardDir,
       })
 
@@ -787,29 +787,29 @@ describe('board manager logic', () => {
     })
 
     it('can start again after stop()', async () => {
-      const { instance } = createMockPlebbit()
-      const mockSub = createMockSubplebbit({ pageCids: {}, pages: {} })
-      vi.mocked(instance.getSubplebbit).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PlebbitInstance['getSubplebbit']>>)
+      const { instance } = createMockPKC()
+      const mockSub = createMockCommunity({ pageCids: {}, pages: {} })
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       const lockPath = join(boardDir, 'state.json.lock')
 
       const boardManager1 = await startBoardManager({
-        subplebbitAddress: 'board.bso',
-        plebbitRpcUrl: 'ws://localhost:9138',
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
         boardDir: boardDir,
       })
       expect(existsSync(lockPath)).toBe(true)
       await boardManager1.stop()
       expect(existsSync(lockPath)).toBe(false)
 
-      // Re-mock Plebbit for second call since mock is consumed
-      const { instance: instance2 } = createMockPlebbit()
-      const mockSub2 = createMockSubplebbit({ pageCids: {}, pages: {} })
-      vi.mocked(instance2.getSubplebbit).mockResolvedValue(mockSub2 as unknown as Awaited<ReturnType<PlebbitInstance['getSubplebbit']>>)
+      // Re-mock PKC for second call since mock is consumed
+      const { instance: instance2 } = createMockPKC()
+      const mockSub2 = createMockCommunity({ pageCids: {}, pages: {} })
+      vi.mocked(instance2.getCommunity).mockResolvedValue(mockSub2 as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       const boardManager2 = await startBoardManager({
-        subplebbitAddress: 'board.bso',
-        plebbitRpcUrl: 'ws://localhost:9138',
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
         boardDir: boardDir,
       })
       expect(existsSync(lockPath)).toBe(true)
@@ -820,7 +820,7 @@ describe('board manager logic', () => {
 
   describe('deleted comment purging', () => {
     it('purges a deleted top-level thread', async () => {
-      const { instance, publishedModerations } = createMockPlebbit()
+      const { instance, publishedModerations } = createMockPKC()
       const threads = [
         mockThread('QmNormal', { deleted: false }),
         mockThread('QmDeleted', { deleted: true }),
@@ -830,16 +830,16 @@ describe('board manager logic', () => {
         nextCid: undefined,
       } as Page)
 
-      const mockSub = createMockSubplebbit({
+      const mockSub = createMockCommunity({
         pageCids: { active: 'QmPage1' },
         pages: {},
         getPage,
       })
-      vi.mocked(instance.getSubplebbit).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PlebbitInstance['getSubplebbit']>>)
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       const boardManager = await startBoardManager({
-        subplebbitAddress: 'board.bso',
-        plebbitRpcUrl: 'ws://localhost:9138',
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
         boardDir: boardDir,
         perPage: 15,
         pages: 10,
@@ -852,7 +852,7 @@ describe('board manager logic', () => {
 
       const purges = publishedModerations.filter((m) => m.commentModeration.purged === true)
       expect(purges[0].commentCid).toBe('QmDeleted')
-      expect(purges[0].subplebbitAddress).toBe('board.bso')
+      expect(purges[0].communityAddress).toBe('board.bso')
       expect(purges[0].signer).toBeDefined()
       expect(purges[0].commentModeration).toEqual({ purged: true, reason: '5chan board manager: content purged — author-deleted' })
 
@@ -861,14 +861,14 @@ describe('board manager logic', () => {
         expect.objectContaining({
           commentCid: 'QmDeleted',
           commentModeration: { purged: true, reason: '5chan board manager: content purged — author-deleted' },
-          subplebbitAddress: 'board.bso',
+          communityAddress: 'board.bso',
         })
       )
       await boardManager.stop()
     })
 
     it('purges a deleted reply in preloaded replies.pages', async () => {
-      const { instance, publishedModerations } = createMockPlebbit()
+      const { instance, publishedModerations } = createMockPKC()
       const threads = [
         mockThread('QmThread1', {
           replies: {
@@ -890,16 +890,16 @@ describe('board manager logic', () => {
         nextCid: undefined,
       } as Page)
 
-      const mockSub = createMockSubplebbit({
+      const mockSub = createMockCommunity({
         pageCids: { active: 'QmPage1' },
         pages: {},
         getPage,
       })
-      vi.mocked(instance.getSubplebbit).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PlebbitInstance['getSubplebbit']>>)
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       const boardManager = await startBoardManager({
-        subplebbitAddress: 'board.bso',
-        plebbitRpcUrl: 'ws://localhost:9138',
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
         boardDir: boardDir,
         perPage: 15,
         pages: 10,
@@ -912,14 +912,14 @@ describe('board manager logic', () => {
 
       const purges = publishedModerations.filter((m) => m.commentModeration.purged === true)
       expect(purges[0].commentCid).toBe('QmReply2')
-      expect(purges[0].subplebbitAddress).toBe('board.bso')
+      expect(purges[0].communityAddress).toBe('board.bso')
       expect(purges[0].signer).toBeDefined()
       expect(purges[0].commentModeration).toEqual({ purged: true, reason: '5chan board manager: content purged — author-deleted' })
       await boardManager.stop()
     })
 
     it('cleans up archivedThreads when deleted thread is purged', async () => {
-      const { instance, publishedModerations } = createMockPlebbit()
+      const { instance, publishedModerations } = createMockPKC()
       const threads = [
         mockThread('QmArchived', { deleted: true }),
       ]
@@ -928,12 +928,12 @@ describe('board manager logic', () => {
         nextCid: undefined,
       } as Page)
 
-      const mockSub = createMockSubplebbit({
+      const mockSub = createMockCommunity({
         pageCids: { active: 'QmPage1' },
         pages: {},
         getPage,
       })
-      vi.mocked(instance.getSubplebbit).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PlebbitInstance['getSubplebbit']>>)
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       // Pre-seed state with thread in archivedThreads (recent timestamp to avoid archive-purge)
       const statePath = join(boardDir, 'state.json')
@@ -943,8 +943,8 @@ describe('board manager logic', () => {
       })
 
       const boardManager = await startBoardManager({
-        subplebbitAddress: 'board.bso',
-        plebbitRpcUrl: 'ws://localhost:9138',
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
         boardDir: boardDir,
         perPage: 15,
         pages: 10,
@@ -961,7 +961,7 @@ describe('board manager logic', () => {
     })
 
     it('purges deleted pinned threads', async () => {
-      const { instance, publishedModerations } = createMockPlebbit()
+      const { instance, publishedModerations } = createMockPKC()
       const threads = [
         mockThread('QmPinned', { pinned: true, deleted: true }),
         mockThread('QmNormal', { deleted: false }),
@@ -971,16 +971,16 @@ describe('board manager logic', () => {
         nextCid: undefined,
       } as Page)
 
-      const mockSub = createMockSubplebbit({
+      const mockSub = createMockCommunity({
         pageCids: { active: 'QmPage1' },
         pages: {},
         getPage,
       })
-      vi.mocked(instance.getSubplebbit).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PlebbitInstance['getSubplebbit']>>)
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       const boardManager = await startBoardManager({
-        subplebbitAddress: 'board.bso',
-        plebbitRpcUrl: 'ws://localhost:9138',
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
         boardDir: boardDir,
         perPage: 15,
         pages: 10,
@@ -1000,23 +1000,23 @@ describe('board manager logic', () => {
 
   describe('moderation reasons', () => {
     it('uses default moderation reasons when not configured', async () => {
-      const { instance, publishedModerations } = createMockPlebbit()
+      const { instance, publishedModerations } = createMockPKC()
       const threads = Array.from({ length: 5 }, (_, i) => mockThread(`QmR${i}`))
       const getPage = vi.fn().mockResolvedValue({
         comments: threads,
         nextCid: undefined,
       } as Page)
 
-      const mockSub = createMockSubplebbit({
+      const mockSub = createMockCommunity({
         pageCids: { active: 'QmPage1' },
         pages: {},
         getPage,
       })
-      vi.mocked(instance.getSubplebbit).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PlebbitInstance['getSubplebbit']>>)
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       const boardManager = await startBoardManager({
-        subplebbitAddress: 'board.bso',
-        plebbitRpcUrl: 'ws://localhost:9138',
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
         boardDir: boardDir,
         perPage: 2,
         pages: 1, // capacity = 2, so 3 archived
@@ -1033,23 +1033,23 @@ describe('board manager logic', () => {
     })
 
     it('uses custom moderation reasons from options (partial override)', async () => {
-      const { instance, publishedModerations } = createMockPlebbit()
+      const { instance, publishedModerations } = createMockPKC()
       const threads = Array.from({ length: 4 }, (_, i) => mockThread(`QmC${i}`))
       const getPage = vi.fn().mockResolvedValue({
         comments: threads,
         nextCid: undefined,
       } as Page)
 
-      const mockSub = createMockSubplebbit({
+      const mockSub = createMockCommunity({
         pageCids: { active: 'QmPage1' },
         pages: {},
         getPage,
       })
-      vi.mocked(instance.getSubplebbit).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PlebbitInstance['getSubplebbit']>>)
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       const boardManager = await startBoardManager({
-        subplebbitAddress: 'board.bso',
-        plebbitRpcUrl: 'ws://localhost:9138',
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
         boardDir: boardDir,
         perPage: 1,
         pages: 1, // capacity = 1, so 3 archived
@@ -1069,7 +1069,7 @@ describe('board manager logic', () => {
     })
 
     it('passes correct reason for bump-limit archive', async () => {
-      const { instance, publishedModerations } = createMockPlebbit()
+      const { instance, publishedModerations } = createMockPKC()
       const threads = [
         mockThread('QmBump', { replyCount: 300 }),
       ]
@@ -1078,16 +1078,16 @@ describe('board manager logic', () => {
         nextCid: undefined,
       } as Page)
 
-      const mockSub = createMockSubplebbit({
+      const mockSub = createMockCommunity({
         pageCids: { active: 'QmPage1' },
         pages: {},
         getPage,
       })
-      vi.mocked(instance.getSubplebbit).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PlebbitInstance['getSubplebbit']>>)
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       const boardManager = await startBoardManager({
-        subplebbitAddress: 'board.bso',
-        plebbitRpcUrl: 'ws://localhost:9138',
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
         boardDir: boardDir,
         perPage: 15,
         pages: 10,
@@ -1106,19 +1106,19 @@ describe('board manager logic', () => {
     })
 
     it('passes purge reason for archived thread purge', async () => {
-      const { instance, publishedModerations } = createMockPlebbit()
+      const { instance, publishedModerations } = createMockPKC()
       const threads = [mockThread('QmKeep')]
       const getPage = vi.fn().mockResolvedValue({
         comments: threads,
         nextCid: undefined,
       } as Page)
 
-      const mockSub = createMockSubplebbit({
+      const mockSub = createMockCommunity({
         pageCids: { active: 'QmPage1' },
         pages: {},
         getPage,
       })
-      vi.mocked(instance.getSubplebbit).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PlebbitInstance['getSubplebbit']>>)
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       // Pre-seed state with an old archived thread
       const statePath = join(boardDir, 'state.json')
@@ -1128,8 +1128,8 @@ describe('board manager logic', () => {
       })
 
       const boardManager = await startBoardManager({
-        subplebbitAddress: 'board.bso',
-        plebbitRpcUrl: 'ws://localhost:9138',
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
         boardDir: boardDir,
         perPage: 15,
         pages: 10,
@@ -1150,7 +1150,7 @@ describe('board manager logic', () => {
     })
 
     it('passes purge reason for author-deleted comment', async () => {
-      const { instance, publishedModerations } = createMockPlebbit()
+      const { instance, publishedModerations } = createMockPKC()
       const threads = [
         mockThread('QmDel', { deleted: true }),
       ]
@@ -1159,16 +1159,16 @@ describe('board manager logic', () => {
         nextCid: undefined,
       } as Page)
 
-      const mockSub = createMockSubplebbit({
+      const mockSub = createMockCommunity({
         pageCids: { active: 'QmPage1' },
         pages: {},
         getPage,
       })
-      vi.mocked(instance.getSubplebbit).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PlebbitInstance['getSubplebbit']>>)
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       const boardManager = await startBoardManager({
-        subplebbitAddress: 'board.bso',
-        plebbitRpcUrl: 'ws://localhost:9138',
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
         boardDir: boardDir,
         perPage: 15,
         pages: 10,
@@ -1193,16 +1193,16 @@ describe('board manager logic', () => {
       const hashBoardDir = join(dir, 'boards', '12D3KooWHash123')
       mkdirSync(hashBoardDir, { recursive: true })
 
-      const { instance } = createMockPlebbit()
-      const mockSub = createMockSubplebbit({
+      const { instance } = createMockPKC()
+      const mockSub = createMockCommunity({
         pageCids: {},
         pages: {},
       }, '12D3KooWHash123')
-      vi.mocked(instance.getSubplebbit).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PlebbitInstance['getSubplebbit']>>)
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       const boardManager = await startBoardManager({
-        subplebbitAddress: '12D3KooWHash123',
-        plebbitRpcUrl: 'ws://localhost:9138',
+        communityAddress: '12D3KooWHash123',
+        pkcRpcUrl: 'ws://localhost:9138',
         boardDir: hashBoardDir,
         onAddressChange: (oldAddr: string, newAddr: string) => {
           renameSync(join(dir, 'boards', oldAddr), join(dir, 'boards', newAddr))
@@ -1240,19 +1240,19 @@ describe('board manager logic', () => {
       const hashBoardDir = join(dir, 'boards', '12D3KooWHash456')
       mkdirSync(hashBoardDir, { recursive: true })
 
-      const { instance } = createMockPlebbit()
-      const mockSub = createMockSubplebbit({
+      const { instance } = createMockPKC()
+      const mockSub = createMockCommunity({
         pageCids: {},
         pages: {},
       }, '12D3KooWHash456')
-      vi.mocked(instance.getSubplebbit).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PlebbitInstance['getSubplebbit']>>)
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       const onAddressChange = vi.fn().mockImplementation((oldAddr: string, newAddr: string) => {
         renameSync(join(dir, 'boards', oldAddr), join(dir, 'boards', newAddr))
       })
       const boardManager = await startBoardManager({
-        subplebbitAddress: '12D3KooWHash456',
-        plebbitRpcUrl: 'ws://localhost:9138',
+        communityAddress: '12D3KooWHash456',
+        pkcRpcUrl: 'ws://localhost:9138',
         boardDir: hashBoardDir,
         onAddressChange,
       })
@@ -1274,23 +1274,23 @@ describe('board manager logic', () => {
       const oldBoardDir = join(dir, 'boards', '12D3KooWOld')
       mkdirSync(oldBoardDir, { recursive: true })
 
-      const { instance, publishedModerations } = createMockPlebbit()
+      const { instance, publishedModerations } = createMockPKC()
       const threads = Array.from({ length: 5 }, (_, i) => mockThread(`QmAddr${i}`))
       const getPage = vi.fn().mockResolvedValue({
         comments: threads,
         nextCid: undefined,
       } as Page)
 
-      const mockSub = createMockSubplebbit({
+      const mockSub = createMockCommunity({
         pageCids: { active: 'QmPage1' },
         pages: {},
         getPage,
       }, '12D3KooWOld')
-      vi.mocked(instance.getSubplebbit).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PlebbitInstance['getSubplebbit']>>)
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       const boardManager = await startBoardManager({
-        subplebbitAddress: '12D3KooWOld',
-        plebbitRpcUrl: 'ws://localhost:9138',
+        communityAddress: '12D3KooWOld',
+        pkcRpcUrl: 'ws://localhost:9138',
         boardDir: oldBoardDir,
         perPage: 2,
         pages: 1, // capacity 2, so 3 archived
@@ -1306,7 +1306,7 @@ describe('board manager logic', () => {
 
       // All initial moderations should use old address
       for (const mod of publishedModerations) {
-        expect(mod.subplebbitAddress).toBe('12D3KooWOld')
+        expect(mod.communityAddress).toBe('12D3KooWOld')
       }
 
       // Simulate address change
@@ -1328,17 +1328,17 @@ describe('board manager logic', () => {
       const stableBoardDir = join(dir, 'boards', 'stable.bso')
       mkdirSync(stableBoardDir, { recursive: true })
 
-      const { instance } = createMockPlebbit()
-      const mockSub = createMockSubplebbit({
+      const { instance } = createMockPKC()
+      const mockSub = createMockCommunity({
         pageCids: {},
         pages: {},
       }, 'stable.bso')
-      vi.mocked(instance.getSubplebbit).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PlebbitInstance['getSubplebbit']>>)
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       const onAddressChange = vi.fn()
       const boardManager = await startBoardManager({
-        subplebbitAddress: 'stable.bso',
-        plebbitRpcUrl: 'ws://localhost:9138',
+        communityAddress: 'stable.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
         boardDir: stableBoardDir,
         onAddressChange,
       })
@@ -1356,12 +1356,12 @@ describe('board manager logic', () => {
       const conflictBoardDir = join(dir, 'boards', '12D3KooWConflict')
       mkdirSync(conflictBoardDir, { recursive: true })
 
-      const { instance } = createMockPlebbit()
-      const mockSub = createMockSubplebbit({
+      const { instance } = createMockPKC()
+      const mockSub = createMockCommunity({
         pageCids: {},
         pages: {},
       }, '12D3KooWConflict')
-      vi.mocked(instance.getSubplebbit).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PlebbitInstance['getSubplebbit']>>)
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       const onAddressChange = vi.fn().mockImplementation((oldAddr: string, newAddr: string) => {
         renameSync(join(dir, 'boards', oldAddr), join(dir, 'boards', newAddr))
@@ -1369,8 +1369,8 @@ describe('board manager logic', () => {
         writeFileSync(join(dir, 'boards', newAddr, 'state.json.lock'), String(process.pid))
       })
       const boardManager = await startBoardManager({
-        subplebbitAddress: '12D3KooWConflict',
-        plebbitRpcUrl: 'ws://localhost:9138',
+        communityAddress: '12D3KooWConflict',
+        pkcRpcUrl: 'ws://localhost:9138',
         boardDir: conflictBoardDir,
         onAddressChange,
       })
@@ -1392,16 +1392,16 @@ describe('board manager logic', () => {
     })
   })
 
-  describe('per-subplebbit state isolation', () => {
-    it('two board managers for different subplebbits use separate state files', async () => {
+  describe('per-community state isolation', () => {
+    it('two board managers for different communities use separate state files', async () => {
       const board1Dir = join(dir, 'boards', 'board1.bso')
       const board2Dir = join(dir, 'boards', 'board2.bso')
       mkdirSync(board1Dir, { recursive: true })
       mkdirSync(board2Dir, { recursive: true })
 
       // First board manager for board1.bso
-      const { instance: instance1 } = createMockPlebbit()
-      const mockSub1 = createMockSubplebbit({
+      const { instance: instance1 } = createMockPKC()
+      const mockSub1 = createMockCommunity({
         pageCids: { active: 'QmPage1' },
         pages: {},
         getPage: vi.fn().mockResolvedValue({
@@ -1409,19 +1409,19 @@ describe('board manager logic', () => {
           nextCid: undefined,
         } as Page),
       }, 'board1.bso')
-      vi.mocked(instance1.getSubplebbit).mockResolvedValue(mockSub1 as unknown as Awaited<ReturnType<PlebbitInstance['getSubplebbit']>>)
+      vi.mocked(instance1.getCommunity).mockResolvedValue(mockSub1 as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       const boardManager1 = await startBoardManager({
-        subplebbitAddress: 'board1.bso',
-        plebbitRpcUrl: 'ws://localhost:9138',
+        communityAddress: 'board1.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
         boardDir: board1Dir,
         perPage: 15,
         pages: 10,
       })
 
       // Second board manager for board2.bso
-      const { instance: instance2 } = createMockPlebbit()
-      const mockSub2 = createMockSubplebbit({
+      const { instance: instance2 } = createMockPKC()
+      const mockSub2 = createMockCommunity({
         pageCids: { active: 'QmPage2' },
         pages: {},
         getPage: vi.fn().mockResolvedValue({
@@ -1429,11 +1429,11 @@ describe('board manager logic', () => {
           nextCid: undefined,
         } as Page),
       }, 'board2.bso')
-      vi.mocked(instance2.getSubplebbit).mockResolvedValue(mockSub2 as unknown as Awaited<ReturnType<PlebbitInstance['getSubplebbit']>>)
+      vi.mocked(instance2.getCommunity).mockResolvedValue(mockSub2 as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       const boardManager2 = await startBoardManager({
-        subplebbitAddress: 'board2.bso',
-        plebbitRpcUrl: 'ws://localhost:9138',
+        communityAddress: 'board2.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
         boardDir: board2Dir,
         perPage: 15,
         pages: 10,
@@ -1452,7 +1452,7 @@ describe('board manager logic', () => {
       expect(state1.signers['board1.bso']).toBeDefined()
       expect(state2.signers['board2.bso']).toBeDefined()
 
-      // Each file only has its own subplebbit's signer
+      // Each file only has its own community's signer
       expect(state1.signers['board2.bso']).toBeUndefined()
       expect(state2.signers['board1.bso']).toBeUndefined()
 

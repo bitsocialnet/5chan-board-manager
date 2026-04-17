@@ -1,8 +1,8 @@
-import { connectToPlebbitRpc } from './plebbit-rpc.js'
-import Logger from '@plebbit/plebbit-logger'
+import { connectToPkcRpc } from './pkc-rpc.js'
+import Logger from '@pkcprotocol/pkc-logger'
 import { join, dirname } from 'node:path'
 import { loadState, saveState, acquireLock } from './state.js'
-import type { BoardManagerOptions, BoardManagerResult, BoardManagerState, Comment, FileLock, ModerationReasons, Subplebbit, Signer, ThreadComment, Page } from './types.js'
+import type { BoardManagerOptions, BoardManagerResult, BoardManagerState, Comment, FileLock, ModerationReasons, Community, Signer, ThreadComment, Page } from './types.js'
 
 const log = Logger('5chan:board-manager:archiver')
 
@@ -21,7 +21,7 @@ const DEFAULTS = {
 
 export async function startBoardManager(options: BoardManagerOptions): Promise<BoardManagerResult> {
   const {
-    plebbitRpcUrl,
+    pkcRpcUrl,
     userAgent,
     perPage = DEFAULTS.perPage,
     pages = DEFAULTS.pages,
@@ -29,7 +29,7 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
     archivePurgeSeconds = DEFAULTS.archivePurgeSeconds,
   } = options
 
-  let subplebbitAddress = options.subplebbitAddress
+  let communityAddress = options.communityAddress
 
   const moderationReasons: Required<ModerationReasons> = {
     archiveCapacity: options.moderationReasons?.archiveCapacity ?? DEFAULTS.moderationReasons.archiveCapacity,
@@ -45,29 +45,29 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
   try {
     fileLock = acquireLock(statePath)
   } catch (err) {
-    throw new Error(`${(err as Error).message} for ${subplebbitAddress}`)
+    throw new Error(`${(err as Error).message} for ${communityAddress}`)
   }
 
   let state: BoardManagerState = loadState(statePath)
 
   let stopped = false
 
-  log(`starting board manager for ${subplebbitAddress} (capacity=${maxThreads}, bumpLimit=${bumpLimit}, purgeAfter=${archivePurgeSeconds}s)`)
+  log(`starting board manager for ${communityAddress} (capacity=${maxThreads}, bumpLimit=${bumpLimit}, purgeAfter=${archivePurgeSeconds}s)`)
 
-  const plebbit = await connectToPlebbitRpc(plebbitRpcUrl, userAgent)
+  const pkc = await connectToPkcRpc(pkcRpcUrl, userAgent)
 
-  async function ensureModRole(subplebbit: Subplebbit, signerAddress: string): Promise<void> {
-    const roles = subplebbit.roles ?? {}
+  async function ensureModRole(community: Community, signerAddress: string): Promise<void> {
+    const roles = community.roles ?? {}
     if (roles[signerAddress]?.role === 'moderator' || roles[signerAddress]?.role === 'admin' || roles[signerAddress]?.role === 'owner') {
       return
     }
-    if (!plebbit.subplebbits.includes(subplebbitAddress)) {
+    if (!pkc.communities.includes(communityAddress)) {
       throw new Error(
-        `Signer ${signerAddress} does not have a moderator role on remote subplebbit ${subplebbitAddress}. Ask the subplebbit owner to add this address as a moderator.`
+        `Signer ${signerAddress} does not have a moderator role on remote community ${communityAddress}. Ask the community owner to add this address as a moderator.`
       )
     }
-    log(`adding moderator role for ${signerAddress} on ${subplebbitAddress}`)
-    await subplebbit.edit({
+    log(`adding moderator role for ${signerAddress} on ${communityAddress}`)
+    await community.edit({
       roles: {
         ...roles,
         [signerAddress]: { role: 'moderator' },
@@ -76,18 +76,18 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
   }
 
   async function getOrCreateSigner(): Promise<Signer> {
-    if (state.signers[subplebbitAddress]) {
-      return plebbit.createSigner({ privateKey: state.signers[subplebbitAddress].privateKey, type: 'ed25519' })
+    if (state.signers[communityAddress]) {
+      return pkc.createSigner({ privateKey: state.signers[communityAddress].privateKey, type: 'ed25519' })
     }
-    log(`creating new signer for ${subplebbitAddress}`)
-    const signer = await plebbit.createSigner()
-    state.signers[subplebbitAddress] = { privateKey: signer.privateKey }
+    log(`creating new signer for ${communityAddress}`)
+    const signer = await pkc.createSigner()
+    state.signers[communityAddress] = { privateKey: signer.privateKey }
     saveState(statePath, state)
     return signer
   }
 
   function migrateAddress(newAddress: string): void {
-    const oldAddress = subplebbitAddress
+    const oldAddress = communityAddress
     const oldStatePath = statePath
 
     log(`address changed: ${oldAddress} → ${newAddress}, migrating state`)
@@ -128,7 +128,7 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
     }
 
     // Update mutable references
-    subplebbitAddress = newAddress
+    communityAddress = newAddress
     statePath = newStatePath
 
     log(`address migration complete: ${oldAddress} → ${newAddress}`)
@@ -136,10 +136,10 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
 
   async function archiveThread(commentCid: string, signer: Signer, reason: string): Promise<void> {
     log(`archiving thread ${commentCid} (${reason})`)
-    const mod = await plebbit.createCommentModeration({
+    const mod = await pkc.createCommentModeration({
       commentCid,
       commentModeration: { archived: true, reason },
-      subplebbitAddress,
+      communityAddress,
       signer,
     })
     await mod.publish()
@@ -149,10 +149,10 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
 
   async function purgeThread(commentCid: string, signer: Signer, reason: string): Promise<void> {
     log(`purging thread ${commentCid}`)
-    const mod = await plebbit.createCommentModeration({
+    const mod = await pkc.createCommentModeration({
       commentCid,
       commentModeration: { purged: true, reason },
-      subplebbitAddress,
+      communityAddress,
       signer,
     })
     await mod.publish()
@@ -162,10 +162,10 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
 
   async function purgeDeletedComment(commentCid: string, signer: Signer, reason: string): Promise<void> {
     log(`purging author-deleted comment ${commentCid}`)
-    const mod = await plebbit.createCommentModeration({
+    const mod = await pkc.createCommentModeration({
       commentCid,
       commentModeration: { purged: true, reason },
-      subplebbitAddress,
+      communityAddress,
       signer,
     })
     await mod.publish()
@@ -184,7 +184,7 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
     async function getCommentInstance(cid: string): Promise<Comment> {
       let instance = commentCache.get(cid)
       if (!instance) {
-        instance = await plebbit.getComment({ cid })
+        instance = await pkc.getComment({ cid })
         commentCache.set(cid, instance)
       }
       return instance
@@ -246,27 +246,27 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
     return deletedCids
   }
 
-  async function handleUpdate(subplebbit: Subplebbit, signer: Signer): Promise<void> {
+  async function handleUpdate(community: Community, signer: Signer): Promise<void> {
     if (stopped) return
 
     // Scenario 3: no posts at all — nothing to archive.
-    const preloadedPage = Object.values(subplebbit.posts.pages)[0]
-    if (!subplebbit.posts.pageCids.active && !preloadedPage) {
+    const preloadedPage = Object.values(community.posts.pages)[0]
+    if (!community.posts.pageCids.active && !preloadedPage) {
       return
     }
 
     // Build full thread list from active sort pages.
-    // The subplebbit IPFS record is capped at 1MB total. The first preloaded page
+    // The community IPFS record is capped at 1MB total. The first preloaded page
     // is loaded into whatever space remains. If all posts fit, there's no nextCid.
     // If they don't fit, nextCid points to additional pages to fetch.
     const threads: ThreadComment[] = []
 
-    if (subplebbit.posts.pageCids.active) {
+    if (community.posts.pageCids.active) {
       // Scenario 1: pageCids.active exists — fetch active-sorted pages
-      let page: Page = await subplebbit.posts.getPage({ cid: subplebbit.posts.pageCids.active })
+      let page: Page = await community.posts.getPage({ cid: community.posts.pageCids.active })
       threads.push(...page.comments)
       while (page.nextCid) {
-        page = await subplebbit.posts.getPage({ cid: page.nextCid })
+        page = await community.posts.getPage({ cid: page.nextCid })
         threads.push(...page.comments)
       }
     } else if (preloadedPage?.comments) {
@@ -274,7 +274,7 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
       threads.push(...preloadedPage.comments)
       let nextCid = preloadedPage.nextCid
       while (nextCid) {
-        const page: Page = await subplebbit.posts.getPage({ cid: nextCid })
+        const page: Page = await community.posts.getPage({ cid: nextCid })
         threads.push(...page.comments)
         nextCid = page.nextCid
       }
@@ -351,10 +351,10 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
     }
   }
 
-  // Startup: get signer, subplebbit, ensure mod role, subscribe to updates
+  // Startup: get signer, community, ensure mod role, subscribe to updates
   const signer = await getOrCreateSigner()
-  const subplebbit = await plebbit.getSubplebbit({ address: subplebbitAddress })
-  await ensureModRole(subplebbit, signer.address)
+  const community = await pkc.getCommunity({ address: communityAddress })
+  await ensureModRole(community, signer.address)
 
   let updateRunning = false
   let updatePendingRerun = false
@@ -369,15 +369,15 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
     const run = async (): Promise<void> => {
       try {
         // Detect address change (e.g., hash → named address via bitsocial-cli)
-        if (subplebbit.address && subplebbit.address !== subplebbitAddress) {
+        if (community.address && community.address !== communityAddress) {
           try {
-            migrateAddress(subplebbit.address)
+            migrateAddress(community.address)
           } catch (err) {
             log.error(`address migration failed: ${err}`)
           }
         }
         const signer = await getOrCreateSigner()
-        await handleUpdate(subplebbit, signer)
+        await handleUpdate(community, signer)
       } catch (err) {
         log.error(`update handler error: ${err}`)
       }
@@ -391,19 +391,19 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
     run()
   }
 
-  subplebbit.on('update', updateHandler)
-  await subplebbit.update()
-  log(`board manager running for ${subplebbitAddress}`)
+  community.on('update', updateHandler)
+  await community.update()
+  log(`board manager running for ${communityAddress}`)
 
   return {
     async stop() {
       stopped = true
-      subplebbit.removeListener('update', updateHandler)
+      community.removeListener('update', updateHandler)
       saveState(statePath, state)
       fileLock.release()
-      await subplebbit.stop?.()
-      await plebbit.destroy()
-      log(`board manager stopped for ${subplebbitAddress}`)
+      await community.stop?.()
+      await pkc.destroy()
+      log(`board manager stopped for ${communityAddress}`)
     },
   }
 }

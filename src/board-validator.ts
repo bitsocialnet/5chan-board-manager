@@ -1,21 +1,21 @@
-import { connectToPlebbitRpc } from './plebbit-rpc.js'
+import { connectToPkcRpc } from './pkc-rpc.js'
 
 /**
- * Validate that a board address exists in the plebbit node's subplebbits list.
+ * Validate that a board address exists in the PKC node's communities list.
  * Throws a descriptive error if the address is not found.
  */
 export async function validateBoardAddress(address: string, rpcUrl: string): Promise<void> {
-  const plebbit = await connectToPlebbitRpc(rpcUrl)
+  const pkc = await connectToPkcRpc(rpcUrl)
   try {
-    if (!plebbit.subplebbits.includes(address)) {
-      const available = plebbit.subplebbits.length > 0
-        ? `Available subplebbits: ${plebbit.subplebbits.join(', ')}`
-        : 'No subplebbits available on this node'
+    if (!pkc.communities.includes(address)) {
+      const available = pkc.communities.length > 0
+        ? `Available communities: ${pkc.communities.join(', ')}`
+        : 'No communities available on this node'
       throw new Error(
-        `Subplebbit "${address}" not found on RPC node at ${rpcUrl}. ${available}`,
+        `Community "${address}" not found on RPC node at ${rpcUrl}. ${available}`,
       )
     }
   } finally {
-    await plebbit.destroy()
+    await pkc.destroy()
   }
 }

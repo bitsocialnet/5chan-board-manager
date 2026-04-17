@@ -1,14 +1,14 @@
-import { connectToPlebbitRpc } from './plebbit-rpc.js'
+import { connectToPkcRpc } from './pkc-rpc.js'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import stripJsonComments from 'strip-json-comments'
 import { z } from 'zod'
-import type { Subplebbit } from './types.js'
+import type { Community } from './types.js'
 
-type SubplebbitEditOptions = Parameters<Subplebbit['edit']>[0]
-type ParseSubplebbitEditOptionsFn = (editOptions: SubplebbitEditOptions) => SubplebbitEditOptions
+type CommunityEditOptions = Parameters<Community['edit']>[0]
+type ParseCommunityEditOptionsFn = (editOptions: CommunityEditOptions) => CommunityEditOptions
 
 export const ModerationReasonsSchema = z.object({
   archiveCapacity: z.string().optional(),
@@ -31,7 +31,7 @@ export const CommunityDefaultsPresetBaseSchema = z.object({
 }).strict()
 
 export interface CommunityDefaultsPreset {
-  boardSettings: SubplebbitEditOptions
+  boardSettings: CommunityEditOptions
   boardManagerSettings: z.infer<typeof BoardManagerSettingsSchema>
 }
 
@@ -46,45 +46,45 @@ const COMMUNITY_DEFAULTS_PRESET_PATH = fileURLToPath(
   new URL('./presets/community-defaults.jsonc', import.meta.url),
 )
 const require = createRequire(import.meta.url)
-let parseSubplebbitEditOptionsPromise: Promise<ParseSubplebbitEditOptionsFn> | undefined
+let parseCommunityEditOptionsPromise: Promise<ParseCommunityEditOptionsFn> | undefined
 let communityDefaultsPresetPromise: Promise<CommunityDefaultsPreset> | undefined
-let parseSubplebbitEditOptionsOverride: ParseSubplebbitEditOptionsFn | undefined
+let parseCommunityEditOptionsOverride: ParseCommunityEditOptionsFn | undefined
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-export async function getParseSubplebbitEditOptions(): Promise<ParseSubplebbitEditOptionsFn> {
-  if (parseSubplebbitEditOptionsOverride) {
-    return parseSubplebbitEditOptionsOverride
+export async function getParseCommunityEditOptions(): Promise<ParseCommunityEditOptionsFn> {
+  if (parseCommunityEditOptionsOverride) {
+    return parseCommunityEditOptionsOverride
   }
 
-  if (!parseSubplebbitEditOptionsPromise) {
-    parseSubplebbitEditOptionsPromise = (async () => {
-      const plebbitEntrypointPath = require.resolve('@plebbit/plebbit-js')
-      const schemaUtilModulePath = join(dirname(plebbitEntrypointPath), 'schema', 'schema-util.js')
+  if (!parseCommunityEditOptionsPromise) {
+    parseCommunityEditOptionsPromise = (async () => {
+      const pkcEntrypointPath = require.resolve('@pkcprotocol/pkc-js')
+      const schemaUtilModulePath = join(dirname(pkcEntrypointPath), 'schema', 'schema-util.js')
       const schemaUtilModule = (await import(pathToFileURL(schemaUtilModulePath).href)) as {
-        parseSubplebbitEditOptionsSchemaWithPlebbitErrorIfItFails?: ParseSubplebbitEditOptionsFn
+        parseCommunityEditOptionsSchemaWithPKCErrorIfItFails?: ParseCommunityEditOptionsFn
       }
 
-      if (!schemaUtilModule.parseSubplebbitEditOptionsSchemaWithPlebbitErrorIfItFails) {
+      if (!schemaUtilModule.parseCommunityEditOptionsSchemaWithPKCErrorIfItFails) {
         throw new Error(
-          `Failed to load parseSubplebbitEditOptionsSchemaWithPlebbitErrorIfItFails from "${schemaUtilModulePath}"`,
+          `Failed to load parseCommunityEditOptionsSchemaWithPKCErrorIfItFails from "${schemaUtilModulePath}"`,
         )
       }
 
-      return schemaUtilModule.parseSubplebbitEditOptionsSchemaWithPlebbitErrorIfItFails
+      return schemaUtilModule.parseCommunityEditOptionsSchemaWithPKCErrorIfItFails
     })()
   }
 
-  return parseSubplebbitEditOptionsPromise
+  return parseCommunityEditOptionsPromise
 }
 
-/** Test hook to avoid loading the full plebbit-js schema module inside Vitest's runtime. */
-export function setParseSubplebbitEditOptionsOverrideForTests(
-  parser: ParseSubplebbitEditOptionsFn | undefined,
+/** Test hook to avoid loading the full pkc-js schema module inside Vitest's runtime. */
+export function setParseCommunityEditOptionsOverrideForTests(
+  parser: ParseCommunityEditOptionsFn | undefined,
 ): void {
-  parseSubplebbitEditOptionsOverride = parser
+  parseCommunityEditOptionsOverride = parser
 }
 
 export function formatZodIssues(error: z.ZodError): string {
@@ -124,10 +124,10 @@ export async function loadCommunityDefaultsPreset(
     )
   }
 
-  const parseSubplebbitEditOptions = await getParseSubplebbitEditOptions()
-  let boardSettings: SubplebbitEditOptions
+  const parseCommunityEditOptions = await getParseCommunityEditOptions()
+  let boardSettings: CommunityEditOptions
   try {
-    boardSettings = parseSubplebbitEditOptions(baseResult.data.boardSettings as SubplebbitEditOptions)
+    boardSettings = parseCommunityEditOptions(baseResult.data.boardSettings as CommunityEditOptions)
   } catch (err) {
     throw new Error(
       `Invalid community defaults preset "${presetPath}": ${(err as Error).message}`,
@@ -198,15 +198,15 @@ export function buildMissingObjectPatch(
 }
 
 export function buildCommunityDefaultsPatch(
-  subplebbit: Subplebbit,
+  community: Community,
   preset: CommunityDefaultsPreset,
-): { patch: SubplebbitEditOptions | undefined; changedFields: string[] } {
+): { patch: CommunityEditOptions | undefined; changedFields: string[] } {
   const boardSettings = preset.boardSettings as Record<string, unknown>
-  const patch = buildMissingObjectPatch(subplebbit, boardSettings)
+  const patch = buildMissingObjectPatch(community, boardSettings)
   const changedFields = patch ? Object.keys(patch) : []
 
   return {
-    patch: patch ? (patch as SubplebbitEditOptions) : undefined,
+    patch: patch ? (patch as CommunityEditOptions) : undefined,
     changedFields,
   }
 }
@@ -216,19 +216,19 @@ export async function applyCommunityDefaultsToBoard(
   rpcUrl: string,
   preset: CommunityDefaultsPreset,
 ): Promise<ApplyCommunityDefaultsResult> {
-  const plebbit = await connectToPlebbitRpc(rpcUrl)
+  const pkc = await connectToPkcRpc(rpcUrl)
 
   try {
-    const subplebbit = await plebbit.getSubplebbit({ address })
-    const { patch, changedFields } = buildCommunityDefaultsPatch(subplebbit, preset)
+    const community = await pkc.getCommunity({ address })
+    const { patch, changedFields } = buildCommunityDefaultsPatch(community, preset)
     if (!patch) {
       return { applied: false, changedFields: [] }
     }
 
-    await subplebbit.edit(patch)
+    await community.edit(patch)
 
     return { applied: true, changedFields }
   } finally {
-    await plebbit.destroy()
+    await pkc.destroy()
   }
 }

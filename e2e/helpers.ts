@@ -1,18 +1,18 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import Plebbit from '@plebbit/plebbit-js'
+import PKC from '@pkcprotocol/pkc-js'
 import { loadState } from '../src/state.js'
-import type { PlebbitInstance, Subplebbit, BoardManagerState, Page, ThreadComment } from '../src/types.js'
+import type { PKCInstance, Community, BoardManagerState, Page, ThreadComment } from '../src/types.js'
 
 export const RPC_URL = 'ws://localhost:9138'
 
-export async function createPlebbitRpc(): Promise<PlebbitInstance> {
-  return Plebbit({ plebbitRpcClientsOptions: [RPC_URL] })
+export async function createPkcRpc(): Promise<PKCInstance> {
+  return PKC({ pkcRpcClientsOptions: [RPC_URL] })
 }
 
-export async function createTestSubplebbit(plebbit: PlebbitInstance): Promise<{ sub: Subplebbit; address: string }> {
-  const sub = await plebbit.createSubplebbit()
+export async function createTestCommunity(pkc: PKCInstance): Promise<{ sub: Community; address: string }> {
+  const sub = await pkc.createCommunity()
   await sub.edit({ settings: { challenges: [] } })
   await sub.start()
   // Wait for the sub to emit its first update (it's running)
@@ -26,13 +26,13 @@ export async function createTestSubplebbit(plebbit: PlebbitInstance): Promise<{ 
 }
 
 export async function publishThread(
-  plebbit: PlebbitInstance,
-  subplebbitAddress: string,
+  pkc: PKCInstance,
+  communityAddress: string,
   title: string,
-): Promise<{ cid: string; signer: Awaited<ReturnType<PlebbitInstance['createSigner']>> }> {
-  const signer = await plebbit.createSigner()
-  const comment = await plebbit.createComment({
-    subplebbitAddress,
+): Promise<{ cid: string; signer: Awaited<ReturnType<PKCInstance['createSigner']>> }> {
+  const signer = await pkc.createSigner()
+  const comment = await pkc.createComment({
+    communityAddress,
     title,
     content: `Content for ${title}`,
     signer,
@@ -58,14 +58,14 @@ export async function publishThread(
 }
 
 export async function publishReply(
-  plebbit: PlebbitInstance,
-  subplebbitAddress: string,
+  pkc: PKCInstance,
+  communityAddress: string,
   parentCid: string,
   postCid?: string,
 ): Promise<string> {
-  const signer = await plebbit.createSigner()
-  const comment = await plebbit.createComment({
-    subplebbitAddress,
+  const signer = await pkc.createSigner()
+  const comment = await pkc.createComment({
+    communityAddress,
     parentCid,
     postCid: postCid ?? parentCid,
     content: `Reply to ${parentCid} at ${Date.now()}`,
@@ -91,8 +91,8 @@ export async function publishReply(
   return cid
 }
 
-/** Collect all threads from a subplebbit's pages (active sort preferred, fallback to any preloaded) */
-async function getAllThreads(sub: Subplebbit): Promise<ThreadComment[]> {
+/** Collect all threads from a community's pages (active sort preferred, fallback to any preloaded) */
+async function getAllThreads(sub: Community): Promise<ThreadComment[]> {
   const threads: ThreadComment[] = []
 
   if (sub.posts.pageCids.active) {
@@ -118,8 +118,8 @@ async function getAllThreads(sub: Subplebbit): Promise<ThreadComment[]> {
   return threads
 }
 
-/** Wait until a thread CID appears in the subplebbit's pages */
-export async function waitForThreadInPages(sub: Subplebbit, threadCid: string, timeoutMs = 120_000): Promise<void> {
+/** Wait until a thread CID appears in the community's pages */
+export async function waitForThreadInPages(sub: Community, threadCid: string, timeoutMs = 120_000): Promise<void> {
   const start = Date.now()
 
   // Check current state first
@@ -145,8 +145,8 @@ export async function waitForThreadInPages(sub: Subplebbit, threadCid: string, t
   })
 }
 
-/** Wait until a thread CID shows archived=true in the subplebbit's pages */
-export async function waitForThreadArchived(sub: Subplebbit, threadCid: string, timeoutMs = 120_000): Promise<void> {
+/** Wait until a thread CID shows archived=true in the community's pages */
+export async function waitForThreadArchived(sub: Community, threadCid: string, timeoutMs = 120_000): Promise<void> {
   const start = Date.now()
 
   const threads = await getAllThreads(sub)
@@ -173,8 +173,8 @@ export async function waitForThreadArchived(sub: Subplebbit, threadCid: string, 
   })
 }
 
-/** Wait until a thread CID shows pinned=true in the subplebbit's pages */
-export async function waitForThreadPinned(sub: Subplebbit, threadCid: string, timeoutMs = 120_000): Promise<void> {
+/** Wait until a thread CID shows pinned=true in the community's pages */
+export async function waitForThreadPinned(sub: Community, threadCid: string, timeoutMs = 120_000): Promise<void> {
   const start = Date.now()
 
   const threads = await getAllThreads(sub)
@@ -201,9 +201,9 @@ export async function waitForThreadPinned(sub: Subplebbit, threadCid: string, ti
   })
 }
 
-/** Wait for a thread's replyCount to reach a target value in the subplebbit's pages */
+/** Wait for a thread's replyCount to reach a target value in the community's pages */
 export async function waitForReplyCount(
-  sub: Subplebbit,
+  sub: Community,
   threadCid: string,
   targetCount: number,
   timeoutMs = 120_000,
@@ -272,7 +272,7 @@ export async function waitForPurgedFromState(statePath: string, cid: string, tim
   })
 }
 
-/** Wait until the board manager signer appears in the state file for a given subplebbit address */
+/** Wait until the board manager signer appears in the state file for a given community address */
 export async function waitForSignerInState(statePath: string, subAddress: string, timeoutMs = 120_000): Promise<void> {
   const start = Date.now()
   return new Promise<void>((resolve, reject) => {
@@ -305,5 +305,5 @@ export function readStateFile(statePath: string): BoardManagerState {
   return loadState(statePath)
 }
 
-/** Load all threads from subplebbit pages and return them */
+/** Load all threads from community pages and return them */
 export { getAllThreads }

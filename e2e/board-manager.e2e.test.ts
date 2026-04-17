@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { startBoardManager } from '../src/board-manager.js'
-import type { PlebbitInstance, BoardManagerResult } from '../src/types.js'
+import type { PKCInstance, BoardManagerResult } from '../src/types.js'
 import {
   RPC_URL,
-  createPlebbitRpc,
-  createTestSubplebbit,
+  createPkcRpc,
+  createTestCommunity,
   publishThread,
   publishReply,
   waitForThreadInPages,
@@ -21,43 +21,43 @@ import {
 } from './helpers.js'
 
 describe('board manager E2E', () => {
-  let plebbit: PlebbitInstance
+  let pkc: PKCInstance
 
   beforeAll(async () => {
-    plebbit = await createPlebbitRpc()
+    pkc = await createPkcRpc()
   })
 
   afterAll(async () => {
-    await plebbit.destroy()
+    await pkc.destroy()
   })
 
   describe('capacity archiving', () => {
     it('archives threads beyond capacity', async () => {
-      const { sub, address } = await createTestSubplebbit(plebbit)
+      const { sub, address } = await createTestCommunity(pkc)
       const { dir, statePath } = createTempStateDir()
       let boardManager: BoardManagerResult | undefined
 
       try {
         // Publish 4 threads sequentially, waiting for each to appear in pages
-        const t1 = await publishThread(plebbit, address, 'Thread 1')
+        const t1 = await publishThread(pkc, address, 'Thread 1')
         await waitForThreadInPages(sub, t1.cid)
 
-        const t2 = await publishThread(plebbit, address, 'Thread 2')
+        const t2 = await publishThread(pkc, address, 'Thread 2')
         await waitForThreadInPages(sub, t2.cid)
 
-        const t3 = await publishThread(plebbit, address, 'Thread 3')
+        const t3 = await publishThread(pkc, address, 'Thread 3')
         await waitForThreadInPages(sub, t3.cid)
 
-        const t4 = await publishThread(plebbit, address, 'Thread 4')
+        const t4 = await publishThread(pkc, address, 'Thread 4')
         await waitForThreadInPages(sub, t4.cid)
 
         // capacity = perPage * pages = 1 * 2 = 2
         // Active sort: T4 (newest), T3, T2, T1 (oldest)
         // T1 and T2 are beyond capacity and should be archived
         boardManager = await startBoardManager({
-          subplebbitAddress: address,
-          plebbitRpcUrl: RPC_URL,
-          statePath,
+          communityAddress: address,
+          pkcRpcUrl: RPC_URL,
+          boardDir: dir,
           perPage: 1,
           pages: 2,
         })
@@ -74,7 +74,7 @@ describe('board manager E2E', () => {
         expect(state.archivedThreads[t4.cid]).toBeUndefined()
         expect(state.signers[address]).toBeDefined()
 
-        // Verify threads are actually archived in subplebbit pages
+        // Verify threads are actually archived in community pages
         await waitForThreadArchived(sub, t1.cid)
         await waitForThreadArchived(sub, t2.cid)
 
@@ -92,26 +92,26 @@ describe('board manager E2E', () => {
     })
 
     it('does not archive threads within capacity', async () => {
-      const { sub, address } = await createTestSubplebbit(plebbit)
+      const { sub, address } = await createTestCommunity(pkc)
       const { dir, statePath } = createTempStateDir()
       let boardManager: BoardManagerResult | undefined
 
       try {
         // Publish 3 threads
-        const t1 = await publishThread(plebbit, address, 'Thread A')
+        const t1 = await publishThread(pkc, address, 'Thread A')
         await waitForThreadInPages(sub, t1.cid)
 
-        const t2 = await publishThread(plebbit, address, 'Thread B')
+        const t2 = await publishThread(pkc, address, 'Thread B')
         await waitForThreadInPages(sub, t2.cid)
 
-        const t3 = await publishThread(plebbit, address, 'Thread C')
+        const t3 = await publishThread(pkc, address, 'Thread C')
         await waitForThreadInPages(sub, t3.cid)
 
         // capacity = 5 * 1 = 5, we only have 3 threads — all within capacity
         boardManager = await startBoardManager({
-          subplebbitAddress: address,
-          plebbitRpcUrl: RPC_URL,
-          statePath,
+          communityAddress: address,
+          pkcRpcUrl: RPC_URL,
+          boardDir: dir,
           perPage: 5,
           pages: 1,
         })
@@ -141,27 +141,27 @@ describe('board manager E2E', () => {
 
   describe('bump limit', () => {
     it('archives thread that reaches bump limit', async () => {
-      const { sub, address } = await createTestSubplebbit(plebbit)
+      const { sub, address } = await createTestCommunity(pkc)
       const { dir, statePath } = createTempStateDir()
       let boardManager: BoardManagerResult | undefined
 
       try {
         // Publish 1 thread + 3 replies
-        const thread = await publishThread(plebbit, address, 'Bump Limit Thread')
+        const thread = await publishThread(pkc, address, 'Bump Limit Thread')
         await waitForThreadInPages(sub, thread.cid)
 
-        await publishReply(plebbit, address, thread.cid)
-        await publishReply(plebbit, address, thread.cid)
-        await publishReply(plebbit, address, thread.cid)
+        await publishReply(pkc, address, thread.cid)
+        await publishReply(pkc, address, thread.cid)
+        await publishReply(pkc, address, thread.cid)
 
         // Wait for replyCount to reach 3 in pages
         await waitForReplyCount(sub, thread.cid, 3)
 
         // bumpLimit=3, large capacity so only bump limit triggers
         boardManager = await startBoardManager({
-          subplebbitAddress: address,
-          plebbitRpcUrl: RPC_URL,
-          statePath,
+          communityAddress: address,
+          pkcRpcUrl: RPC_URL,
+          boardDir: dir,
           bumpLimit: 3,
           perPage: 15,
           pages: 10,
@@ -174,7 +174,7 @@ describe('board manager E2E', () => {
         const state = readStateFile(statePath)
         expect(state.archivedThreads[thread.cid]).toBeDefined()
 
-        // Verify thread is actually archived in subplebbit pages
+        // Verify thread is actually archived in community pages
         await waitForThreadArchived(sub, thread.cid)
       } finally {
         if (boardManager) await boardManager.stop()
@@ -186,23 +186,23 @@ describe('board manager E2E', () => {
 
   describe('purge', () => {
     it('purges archived thread after archivePurgeSeconds', async () => {
-      const { sub, address } = await createTestSubplebbit(plebbit)
+      const { sub, address } = await createTestCommunity(pkc)
       const { dir, statePath } = createTempStateDir()
       let boardManager: BoardManagerResult | undefined
 
       try {
         // Publish 2 threads (T1 oldest, T2 newest)
-        const t1 = await publishThread(plebbit, address, 'Old Thread')
+        const t1 = await publishThread(pkc, address, 'Old Thread')
         await waitForThreadInPages(sub, t1.cid)
 
-        const t2 = await publishThread(plebbit, address, 'New Thread')
+        const t2 = await publishThread(pkc, address, 'New Thread')
         await waitForThreadInPages(sub, t2.cid)
 
         // capacity=1, purge after 5 seconds
         boardManager = await startBoardManager({
-          subplebbitAddress: address,
-          plebbitRpcUrl: RPC_URL,
-          statePath,
+          communityAddress: address,
+          pkcRpcUrl: RPC_URL,
+          boardDir: dir,
           perPage: 1,
           pages: 1,
           archivePurgeSeconds: 5,
@@ -231,30 +231,30 @@ describe('board manager E2E', () => {
 
   describe('pinned thread exemption', () => {
     it('does not archive pinned threads', async () => {
-      const { sub, address } = await createTestSubplebbit(plebbit)
+      const { sub, address } = await createTestCommunity(pkc)
       const { dir, statePath } = createTempStateDir()
       let boardManager: BoardManagerResult | undefined
 
       try {
         // Publish 3 threads
-        const t1 = await publishThread(plebbit, address, 'Thread X')
+        const t1 = await publishThread(pkc, address, 'Thread X')
         await waitForThreadInPages(sub, t1.cid)
 
-        const t2 = await publishThread(plebbit, address, 'Thread Y')
+        const t2 = await publishThread(pkc, address, 'Thread Y')
         await waitForThreadInPages(sub, t2.cid)
 
-        const t3 = await publishThread(plebbit, address, 'Thread Z')
+        const t3 = await publishThread(pkc, address, 'Thread Z')
         await waitForThreadInPages(sub, t3.cid)
 
         // Pin T3 using a moderator signer
-        const modSigner = await plebbit.createSigner()
+        const modSigner = await pkc.createSigner()
         await sub.edit({
           roles: { ...sub.roles, [modSigner.address]: { role: 'moderator' } },
         })
-        const pinMod = await plebbit.createCommentModeration({
+        const pinMod = await pkc.createCommentModeration({
           commentCid: t3.cid,
           commentModeration: { pinned: true },
-          subplebbitAddress: address,
+          communityAddress: address,
           signer: modSigner,
         })
         await pinMod.publish()
@@ -265,9 +265,9 @@ describe('board manager E2E', () => {
         // capacity=1, so among non-pinned (T1, T2), only 1 fits
         // Active sort: T2 (newer), T1 (older) → T1 beyond capacity
         boardManager = await startBoardManager({
-          subplebbitAddress: address,
-          plebbitRpcUrl: RPC_URL,
-          statePath,
+          communityAddress: address,
+          pkcRpcUrl: RPC_URL,
+          boardDir: dir,
           perPage: 1,
           pages: 1,
         })

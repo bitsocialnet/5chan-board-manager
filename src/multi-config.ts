@@ -24,7 +24,7 @@ export function loadMultiConfig(configDir: string): MultiBoardConfig {
  * let startBoardManager's built-in DEFAULTS remain the source of truth.
  */
 export function resolveBoardManagerOptions(board: BoardConfig, config: MultiBoardConfig, configDir: string): BoardManagerOptions {
-  const rpcUrl = config.rpcUrl ?? process.env.PLEBBIT_RPC_WS_URL ?? 'ws://localhost:9138'
+  const rpcUrl = config.rpcUrl ?? process.env.PKC_RPC_WS_URL ?? 'ws://localhost:9138'
 
   const boardReasons = board.moderationReasons
   const defaultReasons = config.defaults?.moderationReasons
@@ -39,8 +39,8 @@ export function resolveBoardManagerOptions(board: BoardConfig, config: MultiBoar
   }
 
   return {
-    subplebbitAddress: board.address,
-    plebbitRpcUrl: rpcUrl,
+    communityAddress: board.address,
+    pkcRpcUrl: rpcUrl,
     boardDir: join(configDir, 'boards', board.address),
     userAgent: config.userAgent,
     perPage: board.perPage ?? config.defaults?.perPage,

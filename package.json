@@ -1,7 +1,7 @@
 {
   "name": "5chan-board-manager",
   "version": "0.2.3",
-  "description": "4chan-style thread auto-archiving and purging for plebbit-js subplebbits",
+  "description": "4chan-style thread auto-archiving and purging for pkc-js communities",
   "license": "GPL-3.0-or-later",
   "repository": {
     "type": "git",
@@ -49,7 +49,7 @@
   "dependencies": {
     "@oclif/core": "4.8.0",
     "@oclif/plugin-help": "6.2.37",
-    "@plebbit/plebbit-js": "git+https://github.com/plebbit/plebbit-js.git#ca9288c42f4b9a3d7ab6928ba03da6931c24e519",
+    "@pkcprotocol/pkc-js": "0.0.16",
     "strip-json-comments": "5.0.3",
     "zod": "4.3.6"
   },

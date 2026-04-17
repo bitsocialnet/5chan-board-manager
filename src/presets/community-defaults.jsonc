@@ -23,7 +23,7 @@
   },
 
   // Board options — applied directly to the board itself (Bitsocial community)
-  // for all options, look at https://github.com/plebbit/plebbit-js?tab=readme-ov-file#subplebbiteditsubplebbiteditoptions
+  // for all options, look at https://github.com/pkcprotocol/pkc-js?tab=readme-ov-file#communityeditcommunityeditoptions
   "boardSettings": {
     // Feature flags that control how users interact with the board
     "features": {
@@ -92,7 +92,7 @@
                 "reply": true,
                 "vote": true,
                 "commentModeration": true,
-                "subplebbitEdit": true,
+                "communityEdit": true,
               },
             },
           ],

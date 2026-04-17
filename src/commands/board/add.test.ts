@@ -13,7 +13,7 @@ vi.mock('../../community-defaults.js', () => ({
   CommunityDefaultsPresetBaseSchema: { safeParse: vi.fn(() => ({ success: true, data: {} })) },
   formatZodIssues: vi.fn(() => 'mock error'),
   getCommunityDefaultsPreset: vi.fn(),
-  getParseSubplebbitEditOptions: vi.fn(),
+  getParseCommunityEditOptions: vi.fn(),
   loadCommunityDefaultsPreset: vi.fn(),
   loadCommunityDefaultsPresetRaw: vi.fn(() => '{}'),
 }))
@@ -343,10 +343,10 @@ describe('board add command', () => {
   })
 
   it('throws when validation fails', async () => {
-    mockValidate.mockRejectedValue(new Error('Subplebbit not found'))
+    mockValidate.mockRejectedValue(new Error('Community not found'))
     const dir = tmpDir()
 
-    await expect(runCommand(['bad.bso'], dir)).rejects.toThrow('Subplebbit not found')
+    await expect(runCommand(['bad.bso'], dir)).rejects.toThrow('Community not found')
   })
 
   it('prints confirmation message', async () => {

@@ -4,7 +4,7 @@ import { deleteBoardConfig } from '../../config-manager.js'
 export default class BoardRemove extends Command {
   static override args = {
     address: Args.string({
-      description: 'Subplebbit address to remove',
+      description: 'Community address to remove',
       required: true,
     }),
   }

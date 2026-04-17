@@ -254,7 +254,7 @@ jobs:
               image: 5chan-board-manager:ci-test
               command: ["sleep", "infinity"]
               environment:
-                - PLEBBIT_RPC_WS_URL=ws://host.docker.internal:9138/ci-test-auth-key
+                - PKC_RPC_WS_URL=ws://host.docker.internal:9138/ci-test-auth-key
           EOF
 
       - name: Start 5chan

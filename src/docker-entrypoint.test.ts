@@ -49,6 +49,6 @@ describe('docker-entrypoint.sh', () => {
   })
 
   it('preserves user-provided DEBUG override for bitsocial daemon', () => {
-    expect(getDebugAfterEntrypoint(['bitsocial', 'daemon'], { DEBUG: 'plebbit:*' })).toBe('plebbit:*')
+    expect(getDebugAfterEntrypoint(['bitsocial', 'daemon'], { DEBUG: 'pkc:*' })).toBe('pkc:*')
   })
 })

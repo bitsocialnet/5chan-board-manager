@@ -1,19 +1,19 @@
-import type PlebbitFn from '@plebbit/plebbit-js'
+import type PKCFn from '@pkcprotocol/pkc-js'
 
-/** The Plebbit instance type returned by `await Plebbit()` */
-export type PlebbitInstance = Awaited<ReturnType<typeof PlebbitFn>>
+/** The PKC instance type returned by `await PKC()` */
+export type PKCInstance = Awaited<ReturnType<typeof PKCFn>>
 
-/** Subplebbit returned by `plebbit.getSubplebbit()` */
-export type Subplebbit = Awaited<ReturnType<PlebbitInstance['getSubplebbit']>>
+/** Community returned by `pkc.getCommunity()` */
+export type Community = Awaited<ReturnType<PKCInstance['getCommunity']>>
 
-/** Signer returned by `plebbit.createSigner()` */
-export type Signer = Awaited<ReturnType<PlebbitInstance['createSigner']>>
+/** Signer returned by `pkc.createSigner()` */
+export type Signer = Awaited<ReturnType<PKCInstance['createSigner']>>
 
-/** Comment returned by `plebbit.getComment()` */
-export type Comment = Awaited<ReturnType<PlebbitInstance['getComment']>>
+/** Comment returned by `pkc.getComment()` */
+export type Comment = Awaited<ReturnType<PKCInstance['getComment']>>
 
-/** A single page returned by `subplebbit.posts.getPage()` */
-export type Page = Awaited<ReturnType<Subplebbit['posts']['getPage']>>
+/** A single page returned by `community.posts.getPage()` */
+export type Page = Awaited<ReturnType<Community['posts']['getPage']>>
 
 /** A comment/thread within a page */
 export type ThreadComment = Page['comments'][number]
@@ -26,8 +26,8 @@ export interface ModerationReasons {
 }
 
 export interface BoardManagerOptions {
-  subplebbitAddress: string
-  plebbitRpcUrl: string
+  communityAddress: string
+  pkcRpcUrl: string
   boardDir: string
   userAgent?: string
   perPage?: number

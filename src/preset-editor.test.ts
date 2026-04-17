@@ -106,7 +106,7 @@ describe('formatPresetDisplay', () => {
     const output = formatPresetDisplay('board.bso', entries)
 
     expect(output).toContain('Preset defaults for "board.bso"')
-    expect(output).toContain('Board Settings (applied to subplebbit)')
+    expect(output).toContain('Board Settings (applied to community)')
     expect(output).toContain('features.noUpvotes')
     expect(output).toContain('true')
     expect(output).toContain('Board Manager Settings (config)')

@@ -7,7 +7,7 @@ A CLI tool that implements 4chan-style thread auto-archiving and purging for 5ch
 - After each board update, determine thread positions in active sort
 - Filter out pinned threads (they're exempt)
 - Count non-pinned threads; any beyond position `per_page × pages` → archive via `createCommentModeration({ commentModeration: { archived: true } })`
-- Archived threads are read-only (plebbit-js already enforces this)
+- Archived threads are read-only (pkc-js already enforces this)
 
 ### Feature 2: Bump limit
 
@@ -67,10 +67,10 @@ Config and state are stored per-board under `~/.config/5chan/`, managed via `5ch
 **Minimal config:** a single directory `boards/my-board.bso/config.json` containing `{ "address": "my-board.bso" }`
 
 All fields except each board's `address` are optional:
-- `rpcUrl` — falls back to `PLEBBIT_RPC_WS_URL` env var, then `ws://localhost:9138`
+- `rpcUrl` — falls back to `PKC_RPC_WS_URL` env var, then `ws://localhost:9138`
 - `defaults` — applied to all boards unless overridden per-board
 - Per-board fields (`perPage`, `pages`, `bumpLimit`, `archivePurgeSeconds`, `moderationReasons`) override `defaults`
-- `moderationReasons` — optional object with `archiveCapacity`, `archiveBumpLimit`, `purgeArchived`, `purgeDeleted` string fields. Per-board values override defaults per-field (not the whole object). These reason strings are passed to `createCommentModeration()` so plebbit clients can display why a thread was archived or purged.
+- `moderationReasons` — optional object with `archiveCapacity`, `archiveBumpLimit`, `purgeArchived`, `purgeDeleted` string fields. Per-board values override defaults per-field (not the whole object). These reason strings are passed to `createCommentModeration()` so PKC clients can display why a thread was archived or purged.
 - Board directory names must match the address field in `config.json`
 
 
@@ -79,7 +79,7 @@ All fields except each board's `address` are optional:
 
 #### Full stack (with bitsocial-cli)
 
-If you **don't** already have [bitsocial-cli](https://github.com/bitsocialhq/bitsocial-cli) running, use the full stack compose file which boots both bitsocial-cli (Plebbit RPC server) and 5chan together.:
+If you **don't** already have [bitsocial-cli](https://github.com/bitsocialhq/bitsocial-cli) running, use the full stack compose file which boots both bitsocial-cli (PKC RPC server) and 5chan together.:
 
 ```bash
 wget -O docker-compose.yml https://raw.githubusercontent.com/bitsocialhq/5chan-board-manager/master/docker-compose.example.yml
@@ -124,12 +124,12 @@ If you **already** have bitsocial-cli running separately (on the host, in anothe
 
 ```bash
 cp docker-compose.standalone.example.yml docker-compose.yml
-# Edit PLEBBIT_RPC_WS_URL in docker-compose.yml — replace YOUR-AUTH-KEY with
+# Edit PKC_RPC_WS_URL in docker-compose.yml — replace YOUR-AUTH-KEY with
 # your bitsocial-cli auth key (find it with: docker logs <bitsocial-container> 2>&1 | grep "secret auth key")
 docker compose up -d
 ```
 
-Set `PLEBBIT_RPC_WS_URL` to the address of your existing instance, **including the auth key** as a path segment:
+Set `PKC_RPC_WS_URL` to the address of your existing instance, **including the auth key** as a path segment:
 
 - **bitsocial-cli on the host (no container):** Use `ws://host.docker.internal:9138/YOUR-AUTH-KEY`. The example compose file includes `extra_hosts: ["host.docker.internal:host-gateway"]` so this works on Linux, macOS, and Windows.
 - **bitsocial-cli in another Docker container/network:** Use the container or service name, e.g. `ws://bitsocial:9138/YOUR-AUTH-KEY`, and make sure both containers share the same Docker network.
@@ -194,13 +194,13 @@ Run `5chan board add --help` for full details on preset defaults flags (`--apply
 
 Preset JSONC is validated with Zod. Both plain JSON and JSONC (with `//` comments) are accepted as preset files.
 
-`boardSettings` must follow plebbit-js `SubplebbitEditOptions`:
-https://github.com/plebbit/plebbit-js?tab=readme-ov-file#subplebbiteditoptions
+`boardSettings` must follow pkc-js `CommunityEditOptions`:
+https://github.com/pkcprotocol/pkc-js?tab=readme-ov-file#communityeditcommunityeditoptions
 
 Bundled preset JSONC defaults:
 [`src/presets/community-defaults.jsonc`](src/presets/community-defaults.jsonc)
 
-`boardSettings` is merged into `subplebbit.edit()` with "missing only" semantics (only absent values are applied). `boardManagerSettings` is used as default values for `board add` config fields, and explicit CLI flags override these defaults.
+`boardSettings` is merged into `community.edit()` with "missing only" semantics (only absent values are applied). `boardManagerSettings` is used as default values for `board add` config fields, and explicit CLI flags override these defaults.
 
 The bundled preset file is `src/presets/community-defaults.jsonc`.
 
@@ -236,7 +236,7 @@ FLAGS
   --interactive-apply-defaults     Interactively review and modify preset defaults before applying
   --pages=<value>                  Number of pages
   --per-page=<value>               Posts per page
-  --rpc-url=<value>                [default: ws://localhost:9138, env: PLEBBIT_RPC_WS_URL] Plebbit RPC WebSocket URL
+  --rpc-url=<value>                [default: ws://localhost:9138, env: PKC_RPC_WS_URL] PKC RPC WebSocket URL
                                    (for validation)
   --skip-apply-defaults            Skip applying preset defaults
 
@@ -350,7 +350,7 @@ USAGE
   $ 5chan board remove ADDRESS
 
 ARGUMENTS
-  ADDRESS  Subplebbit address to remove
+  ADDRESS  Community address to remove
 
 DESCRIPTION
   Remove a board from the config
@@ -483,18 +483,18 @@ The board manager detects comments and replies that were deleted by their author
 
 ## Auto Mod Signer Management
 
-On startup for each board (using the internally-created Plebbit instance):
+On startup for each board (using the internally-created PKC instance):
 
 1. Check state JSON for a signer private key for this board address
-2. If none exists, create one via `plebbit.createSigner()` and save to state JSON
-3. Check board roles via `subplebbit.roles` for the signer's address
-4. If not a mod, auto-add via `subplebbit.edit()` (works because we run on `LocalSubplebbit` or `RpcLocalSubplebbit` — we own the board)
+2. If none exists, create one via `pkc.createSigner()` and save to state JSON
+3. Check board roles via `community.roles` for the signer's address
+4. If not a mod, auto-add via `community.edit()` (works because we run on `LocalCommunity` or `RpcLocalCommunity` — we own the board)
 
-Logged via `plebbit-logger` when creating signer or adding mod role.
+Logged via `pkc-logger` when creating signer or adding mod role.
 
 ## Address Change Handling
 
-When bitsocial-cli changes a board's address (e.g., from a hash like `12D3KooW...` to a named address like `random.bso`), the board manager detects the change automatically via the plebbit-js `update` event and migrates all associated files:
+When bitsocial-cli changes a board's address (e.g., from a hash like `12D3KooW...` to a named address like `random.bso`), the board manager detects the change automatically via the pkc-js `update` event and migrates all associated files:
 
 1. Signer key is moved to the new address in the state file
 2. Board directory is renamed from `boards/{oldAddress}/` to `boards/{newAddress}/` (with updated `address` field in `config.json`)
@@ -529,11 +529,11 @@ The script may start long after the board has been running. On first run, many t
 
 ## Idempotency
 
-Before archiving, checks the thread's `archived` property. Skips if already archived (plebbit-js throws on duplicate moderation actions).
+Before archiving, checks the thread's `archived` property. Skips if already archived (pkc-js throws on duplicate moderation actions).
 
 ## Logging
 
-Uses `plebbit-logger` (same logger as the plebbit-js ecosystem). Key events logged:
+Uses `pkc-logger` (same logger as the pkc-js ecosystem). Key events logged:
 
 - Board manager start/stop
 - Threads archived (with CID and reason: capacity vs bump limit)
@@ -543,7 +543,7 @@ Uses `plebbit-logger` (same logger as the plebbit-js ecosystem). Key events logg
 - Mod role auto-added
 - Errors
 
-**Docker:** Debug logging (`DEBUG=5chan:*`) is enabled by default in the Docker image, so `docker logs` shows the full plebbit-logger output. To silence it, override the variable:
+**Docker:** Debug logging (`DEBUG=5chan:*`) is enabled by default in the Docker image, so `docker logs` shows the full pkc-logger output. To silence it, override the variable:
 
 ```bash
 docker run -e DEBUG= 5chan-board-manager
@@ -579,7 +579,7 @@ Capacity examples: /b/ = 150, /v/ = 200, /f/ = 30.
 
 ### Bumping
 
-A reply moves the thread to the top of page 1. This is equivalent to plebbit's **"active sort"**, which orders threads by `lastReplyTimestamp`.
+A reply moves the thread to the top of page 1. This is equivalent to PKC's **"active sort"**, which orders threads by `lastReplyTimestamp`.
 
 ### Bump limit
 
@@ -609,20 +609,20 @@ External services (archive.4plebs.org, desuarchive.org) independently scrape and
 
 | Behavior | 4chan | This module |
 |----------|------|-------------|
-| **Bump limit** | Threads past bump limit still accept replies — they just stop rising in the catalog | Threads are **archived** (no more replies) because plebbit-js has no "stop bumping without archiving" mechanism |
-| **Sage** | Replying with `sage` in the email field prevents the thread from being bumped | Not supported — plebbit has no equivalent mechanism, so all replies bump the thread |
-| **Image limit** | Per-thread image limit (e.g., 150 images on /b/) after which no more images can be posted | Not implemented — plebbit-js has its own file-size constraints but no per-thread image count limit |
+| **Bump limit** | Threads past bump limit still accept replies — they just stop rising in the catalog | Threads are **archived** (no more replies) because pkc-js has no "stop bumping without archiving" mechanism |
+| **Sage** | Replying with `sage` in the email field prevents the thread from being bumped | Not supported — PKC has no equivalent mechanism, so all replies bump the thread |
+| **Image limit** | Per-thread image limit (e.g., 150 images on /b/) after which no more images can be posted | Not implemented — pkc-js has its own file-size constraints but no per-thread image count limit |
 
-## Plebbit-js Implementation
+## PKC-js Implementation
 
 ### Architecture
 
-External module using plebbit-js's public API:
+External module using pkc-js's public API:
 
-- No plebbit-js core modifications needed
-- Uses `plebbit.createCommentModeration()` for both archiving and purging
-- Listens to board `update` events (via `subplebbit.on('update', ...)`) to detect new posts
-- Gets thread positions from board post feeds (`subplebbit.posts.pageCids.active`), or falls back to sorting preloaded pages by `lastReplyTimestamp` descending (then `postNumber`)
+- No pkc-js core modifications needed
+- Uses `pkc.createCommentModeration()` for both archiving and purging
+- Listens to board `update` events (via `community.on('update', ...)`) to detect new posts
+- Gets thread positions from board post feeds (`community.posts.pageCids.active`), or falls back to sorting preloaded pages by `lastReplyTimestamp` descending (then `postNumber`)
 
 ### Configurable settings
 
@@ -640,30 +640,30 @@ Uses 4chan field names for interoperability.
 
 ### API note
 
-Cannot do `subplebbit.posts.getPage("active")`. Must either:
+Cannot do `community.posts.getPage("active")`. Must either:
 
-1. Use `subplebbit.posts.pageCids.active` to get the CID, then fetch that page
+1. Use `community.posts.pageCids.active` to get the CID, then fetch that page
 2. Or fall back to sorting preloaded pages by `lastReplyTimestamp` descending, then `postNumber` (approximates active sort without needing `pageCids.active`)
 
 ### Board record size constraint
 
-The entire board IPFS record is capped at 1MB (`MAX_FILE_SIZE_BYTES_FOR_SUBPLEBBIT_IPFS`). `subplebbit.posts.pages.hot` is preloaded into the record with whatever space remains after the rest of the record (title, description, roles, challenges, etc.).
+The entire board IPFS record is capped at 1MB (`MAX_FILE_SIZE_BYTES_FOR_COMMUNITY_IPFS`). `community.posts.pages.hot` is preloaded into the record with whatever space remains after the rest of the record (title, description, roles, challenges, etc.).
 
 - If the preloaded page has **no `nextCid`**, it contains all posts — no pagination needed
-- If `nextCid` **is present**, additional pages must be fetched via `subplebbit.posts.getPage({ cid: nextCid })`
-- `subplebbit.posts.pageCids.active` provides the CID of the first active-sorted page, which is the sort order the board manager needs
+- If `nextCid` **is present**, additional pages must be fetched via `community.posts.getPage({ cid: nextCid })`
+- `community.posts.pageCids.active` provides the CID of the first active-sorted page, which is the sort order the board manager needs
 
-Reference: `plebbit-js/src/subplebbit/subplebbit-client-manager.ts:38`, `plebbit-js/src/runtime/node/subplebbit/local-subplebbit.ts:714`
+Reference: `pkc-js/src/community/community-client-manager.ts`, `pkc-js/src/runtime/node/community/local-community.ts`
 
 ### Module flow
 
 ```
-1. Create Plebbit instance internally from the provided plebbitRpcUrl
-2. Load state JSON; get or create signer for this board via `plebbit.createSigner()`
-3. Get board (`LocalSubplebbit` or `RpcLocalSubplebbit`)
-4. Check board roles via `subplebbit.roles`; if missing, call `subplebbit.edit()` to add as mod
+1. Create PKC instance internally from the provided pkcRpcUrl
+2. Load state JSON; get or create signer for this board via `pkc.createSigner()`
+3. Get board (`LocalCommunity` or `RpcLocalCommunity`)
+4. Check board roles via `community.roles`; if missing, call `community.edit()` to add as mod
 5. Acquire file lock to prevent concurrent board managers on same board
-6. Call `subplebbit.update()`
+6. Call `community.update()`
 7. On each 'update' event:
    a. Determine thread source (three scenarios):
       1. pageCids.active exists → fetch via getPage(), paginate via nextCid
@@ -686,23 +686,23 @@ Reference: `plebbit-js/src/subplebbit/subplebbit-client-manager.ts:38`, `plebbit
       - createCommentModeration({ purged: true }) and publish
 ```
 
-### Key plebbit-js APIs used
+### Key pkc-js APIs used
 
 | API | Purpose |
 |-----|---------|
-| `plebbit.createCommentModeration()` | Archive and purge threads |
+| `pkc.createCommentModeration()` | Archive and purge threads |
 | `commentModeration.publish()` | Publish the moderation action |
-| `subplebbit.posts.pageCids.active` | Get active sort page CID |
-| `subplebbit.posts.pages.hot` | Preloaded first page (for calculating active sort) |
-| `subplebbit.on('update', ...)` | Listen for new posts/updates |
+| `community.posts.pageCids.active` | Get active sort page CID |
+| `community.posts.pages.hot` | Preloaded first page (for calculating active sort) |
+| `community.on('update', ...)` | Listen for new posts/updates |
 | `page.nextCid` | Paginate through multi-page feeds |
 
-### Key plebbit-js source files (reference only, not modified)
+### Key pkc-js source files (reference only, not modified)
 
 | File | Relevant code |
 |------|--------------|
-| `src/plebbit/plebbit.ts:806` | `createCommentModeration()` definition |
-| `src/publications/comment-moderation/schema.ts:24` | ModeratorOptionsSchema with `archived`, `purged` fields |
-| `src/runtime/node/subplebbit/local-subplebbit.ts:1658` | Existing archived check that blocks replies |
-| `src/runtime/node/subplebbit/db-handler.ts:2567` | `queryPostsWithActiveScore()` — active sort CTE |
+| `src/pkc/pkc.ts` | `createCommentModeration()` definition |
+| `src/publications/comment-moderation/schema.ts` | ModeratorOptionsSchema with `archived`, `purged` fields |
+| `src/runtime/node/community/local-community.ts` | Existing archived check that blocks replies |
+| `src/runtime/node/community/db-handler.ts` | `queryPostsWithActiveScore()` — active sort CTE |
 | `src/pages/util.ts` | Sort type definitions and scoring functions |

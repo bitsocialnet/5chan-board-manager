@@ -9,7 +9,7 @@ import {
   CommunityDefaultsPresetBaseSchema,
   formatZodIssues,
   getCommunityDefaultsPreset,
-  getParseSubplebbitEditOptions,
+  getParseCommunityEditOptions,
   loadCommunityDefaultsPreset,
   loadCommunityDefaultsPresetRaw,
 } from '../../community-defaults.js'
@@ -56,8 +56,8 @@ https://github.com/bitsocialhq/bitsocial-cli#bitsocial-community-edit-address`
 
   static override flags = {
     'rpc-url': Flags.string({
-      description: 'Plebbit RPC WebSocket URL (for validation)',
-      env: 'PLEBBIT_RPC_WS_URL',
+      description: 'PKC RPC WebSocket URL (for validation)',
+      env: 'PKC_RPC_WS_URL',
       default: 'ws://localhost:9138',
     }),
     'per-page': Flags.integer({
@@ -176,9 +176,9 @@ https://github.com/bitsocialhq/bitsocial-cli#bitsocial-community-edit-address`
       this.error(`Invalid boardManagerSettings: ${formatZodIssues(bmResult.error)}`)
     }
 
-    const parseSubplebbitEditOptions = await getParseSubplebbitEditOptions()
+    const parseCommunityEditOptions = await getParseCommunityEditOptions()
     try {
-      parseSubplebbitEditOptions(baseResult.data.boardSettings as Parameters<typeof parseSubplebbitEditOptions>[0])
+      parseCommunityEditOptions(baseResult.data.boardSettings as Parameters<typeof parseCommunityEditOptions>[0])
     } catch (err) {
       this.error(`Invalid boardSettings: ${(err as Error).message}`)
     }

@@ -1,17 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { validateBoardAddress } from './board-validator.js'
-import type { PlebbitInstance } from './types.js'
+import type { PKCInstance } from './types.js'
 
-vi.mock('./plebbit-rpc.js', () => ({
-  connectToPlebbitRpc: vi.fn(),
+vi.mock('./pkc-rpc.js', () => ({
+  connectToPkcRpc: vi.fn(),
 }))
 
-import { connectToPlebbitRpc } from './plebbit-rpc.js'
+import { connectToPkcRpc } from './pkc-rpc.js'
 
-const mockConnect = vi.mocked(connectToPlebbitRpc)
+const mockConnect = vi.mocked(connectToPkcRpc)
 
-function mockPlebbitInstance(subplebbits: string[], destroy: () => Promise<void>): PlebbitInstance {
-  return { subplebbits, destroy } as unknown as PlebbitInstance
+function mockPKCInstance(communities: string[], destroy: () => Promise<void>): PKCInstance {
+  return { communities, destroy } as unknown as PKCInstance
 }
 
 describe('validateBoardAddress', () => {
@@ -22,52 +22,52 @@ describe('validateBoardAddress', () => {
     mockDestroy.mockClear()
   })
 
-  it('succeeds when address is in subplebbits list', async () => {
-    mockConnect.mockResolvedValue(mockPlebbitInstance(['board.bso', 'other.bso'], mockDestroy))
+  it('succeeds when address is in communities list', async () => {
+    mockConnect.mockResolvedValue(mockPKCInstance(['board.bso', 'other.bso'], mockDestroy))
 
     await expect(validateBoardAddress('board.bso', 'ws://localhost:9138')).resolves.toBeUndefined()
     expect(mockDestroy).toHaveBeenCalledOnce()
   })
 
-  it('throws when address is not in subplebbits list', async () => {
-    mockConnect.mockResolvedValue(mockPlebbitInstance(['other.bso', 'another.bso'], mockDestroy))
+  it('throws when address is not in communities list', async () => {
+    mockConnect.mockResolvedValue(mockPKCInstance(['other.bso', 'another.bso'], mockDestroy))
 
     await expect(validateBoardAddress('missing.bso', 'ws://localhost:9138'))
-      .rejects.toThrow('Subplebbit "missing.bso" not found')
+      .rejects.toThrow('Community "missing.bso" not found')
     expect(mockDestroy).toHaveBeenCalledOnce()
   })
 
-  it('lists available subplebbits in error message', async () => {
-    mockConnect.mockResolvedValue(mockPlebbitInstance(['a.bso', 'b.bso'], mockDestroy))
+  it('lists available communities in error message', async () => {
+    mockConnect.mockResolvedValue(mockPKCInstance(['a.bso', 'b.bso'], mockDestroy))
 
     await expect(validateBoardAddress('missing.bso', 'ws://localhost:9138'))
-      .rejects.toThrow('Available subplebbits: a.bso, b.bso')
+      .rejects.toThrow('Available communities: a.bso, b.bso')
   })
 
-  it('shows "no subplebbits available" when list is empty', async () => {
-    mockConnect.mockResolvedValue(mockPlebbitInstance([], mockDestroy))
+  it('shows "no communities available" when list is empty', async () => {
+    mockConnect.mockResolvedValue(mockPKCInstance([], mockDestroy))
 
     await expect(validateBoardAddress('missing.bso', 'ws://localhost:9138'))
-      .rejects.toThrow('No subplebbits available on this node')
+      .rejects.toThrow('No communities available on this node')
   })
 
   it('includes RPC URL in error message', async () => {
-    mockConnect.mockResolvedValue(mockPlebbitInstance([], mockDestroy))
+    mockConnect.mockResolvedValue(mockPKCInstance([], mockDestroy))
 
     await expect(validateBoardAddress('x.bso', 'ws://custom:9138'))
       .rejects.toThrow('ws://custom:9138')
   })
 
-  it('passes correct RPC URL to connectToPlebbitRpc', async () => {
-    mockConnect.mockResolvedValue(mockPlebbitInstance(['board.bso'], mockDestroy))
+  it('passes correct RPC URL to connectToPkcRpc', async () => {
+    mockConnect.mockResolvedValue(mockPKCInstance(['board.bso'], mockDestroy))
 
     await validateBoardAddress('board.bso', 'ws://test:9138')
 
     expect(mockConnect).toHaveBeenCalledWith('ws://test:9138')
   })
 
-  it('destroys plebbit instance even when validation fails', async () => {
-    mockConnect.mockResolvedValue(mockPlebbitInstance([], mockDestroy))
+  it('destroys PKC instance even when validation fails', async () => {
+    mockConnect.mockResolvedValue(mockPKCInstance([], mockDestroy))
 
     try {
       await validateBoardAddress('x.bso', 'ws://localhost:9138')

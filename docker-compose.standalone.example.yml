@@ -2,7 +2,7 @@
 #
 # Quick start:
 #   cp docker-compose.standalone.example.yml docker-compose.yml
-#   # Edit PLEBBIT_RPC_WS_URL to point at your running bitsocial-cli instance
+#   # Edit PKC_RPC_WS_URL to point at your running bitsocial-cli instance
 #   # Create /data/config.json with your boards (see README.md)
 #   docker compose up -d
 #
@@ -21,7 +21,7 @@ services:
     environment:
       # Append your bitsocial-cli auth key to the URL.
       # Find it with: docker logs <bitsocial-container> 2>&1 | grep "secret auth key"
-      - PLEBBIT_RPC_WS_URL=ws://host.docker.internal:9138/YOUR-AUTH-KEY
+      - PKC_RPC_WS_URL=ws://host.docker.internal:9138/YOUR-AUTH-KEY
 
 volumes:
   5chan-data:

@@ -156,8 +156,8 @@ describe('startBoardManagers', () => {
     const manager = await startBoardManagers(dir, config)
 
     const opts = mockStartBoardManager.mock.calls[0][0] as BoardManagerOptions
-    expect(opts.subplebbitAddress).toBe('x.bso')
-    expect(opts.plebbitRpcUrl).toBe('ws://test:9138')
+    expect(opts.communityAddress).toBe('x.bso')
+    expect(opts.pkcRpcUrl).toBe('ws://test:9138')
     expect(opts.boardDir).toBe(join(dir, 'boards', 'x.bso'))
     expect(opts.perPage).toBe(20)
     expect(opts.bumpLimit).toBe(500)

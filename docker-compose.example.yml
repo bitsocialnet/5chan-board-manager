@@ -1,4 +1,4 @@
-# Example Docker Compose: 5chan board manager with bitsocial-cli (Plebbit RPC)
+# Example Docker Compose: 5chan board manager with bitsocial-cli (PKC RPC)
 #
 # Quick start:
 #   cp docker-compose.example.yml docker-compose.yml
@@ -45,7 +45,7 @@ services:
       - 5chan-data:/data
     environment:
       # Must match PLEBBIT_RPC_AUTH_KEY on the bitsocial service above
-      - PLEBBIT_RPC_WS_URL=ws://bitsocial:9138/TFCh0joRU60KwlfVaprP2uenw7NCdAwsBCF5UDoVg
+      - PKC_RPC_WS_URL=ws://bitsocial:9138/TFCh0joRU60KwlfVaprP2uenw7NCdAwsBCF5UDoVg
 
 volumes:
   bitsocial-data:

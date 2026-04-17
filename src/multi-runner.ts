@@ -1,4 +1,4 @@
-import Logger from '@plebbit/plebbit-logger'
+import Logger from '@pkcprotocol/pkc-logger'
 import { join } from 'node:path'
 import { renameSync } from 'node:fs'
 import { startBoardManager } from './board-manager.js'

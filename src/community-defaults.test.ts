@@ -3,42 +3,42 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
-vi.mock('./plebbit-rpc.js', () => ({
-  connectToPlebbitRpc: vi.fn(),
+vi.mock('./pkc-rpc.js', () => ({
+  connectToPkcRpc: vi.fn(),
 }))
 
-import { connectToPlebbitRpc } from './plebbit-rpc.js'
+import { connectToPkcRpc } from './pkc-rpc.js'
 import {
   applyCommunityDefaultsToBoard,
   buildCommunityDefaultsPatch,
   buildMissingObjectPatch,
   loadCommunityDefaultsPreset,
   loadCommunityDefaultsPresetRaw,
-  setParseSubplebbitEditOptionsOverrideForTests,
+  setParseCommunityEditOptionsOverrideForTests,
 } from './community-defaults.js'
-import type { PlebbitInstance, Subplebbit } from './types.js'
+import type { PKCInstance, Community } from './types.js'
 
-const mockConnect = vi.mocked(connectToPlebbitRpc)
+const mockConnect = vi.mocked(connectToPkcRpc)
 
 function makeTmpDir(): string {
   return mkdtempSync(join(tmpdir(), 'community-defaults-test-'))
 }
 
-function createMockSubplebbit(overrides: Partial<Pick<Subplebbit, 'features' | 'settings'>> = {}): Subplebbit {
-  const edit = vi.fn<Subplebbit['edit']>().mockResolvedValue(undefined)
+function createMockCommunity(overrides: Partial<Pick<Community, 'features' | 'settings'>> = {}): Community {
+  const edit = vi.fn<Community['edit']>().mockResolvedValue(undefined)
   return {
     features: {},
     settings: {},
     edit,
     ...overrides,
-  } as unknown as Subplebbit
+  } as unknown as Community
 }
 
-function createMockPlebbitInstance(subplebbit: Subplebbit): PlebbitInstance {
+function createMockPKCInstance(community: Community): PKCInstance {
   return {
-    getSubplebbit: vi.fn<PlebbitInstance['getSubplebbit']>().mockResolvedValue(subplebbit),
-    destroy: vi.fn<PlebbitInstance['destroy']>().mockResolvedValue(undefined),
-  } as unknown as PlebbitInstance
+    getCommunity: vi.fn<PKCInstance['getCommunity']>().mockResolvedValue(community),
+    destroy: vi.fn<PKCInstance['destroy']>().mockResolvedValue(undefined),
+  } as unknown as PKCInstance
 }
 
 describe('community defaults preset loading', () => {
@@ -55,11 +55,11 @@ describe('community defaults preset loading', () => {
       rmSync(d, { recursive: true, force: true })
     }
     dirs.length = 0
-    setParseSubplebbitEditOptionsOverrideForTests(undefined)
+    setParseCommunityEditOptionsOverrideForTests(undefined)
   })
 
   beforeEach(() => {
-    setParseSubplebbitEditOptionsOverrideForTests((editOptions) => {
+    setParseCommunityEditOptionsOverrideForTests((editOptions) => {
       const pseudonymityMode = (editOptions as { features?: { pseudonymityMode?: unknown } })
         .features?.pseudonymityMode
       if (
@@ -248,12 +248,12 @@ describe('buildMissingObjectPatch', () => {
 
 describe('buildCommunityDefaultsPatch', () => {
   it('builds patch only for missing boardSettings values', () => {
-    const subplebbit = createMockSubplebbit({
+    const community = createMockCommunity({
       features: { noUpvotes: false },
       settings: { challenges: [{ name: 'captcha' }] },
     })
 
-    const { patch, changedFields } = buildCommunityDefaultsPatch(subplebbit, {
+    const { patch, changedFields } = buildCommunityDefaultsPatch(community, {
       boardSettings: {
         features: { noUpvotes: true, noDownvotes: true },
         settings: { challenges: [{ name: 'captcha-v2' }], fetchThumbnailUrls: false },
@@ -274,12 +274,12 @@ describe('applyCommunityDefaultsToBoard', () => {
     mockConnect.mockReset()
   })
 
-  it('applies defaults and edits subplebbit when patch is non-empty', async () => {
-    const subplebbit = createMockSubplebbit({
+  it('applies defaults and edits community when patch is non-empty', async () => {
+    const community = createMockCommunity({
       features: { noUpvotes: false },
       settings: {},
     })
-    const instance = createMockPlebbitInstance(subplebbit)
+    const instance = createMockPKCInstance(community)
     mockConnect.mockResolvedValue(instance)
 
     const result = await applyCommunityDefaultsToBoard('board.bso', 'ws://localhost:9138', {
@@ -292,7 +292,7 @@ describe('applyCommunityDefaultsToBoard', () => {
 
     expect(result.applied).toBe(true)
     expect(result.changedFields).toEqual(['features', 'settings'])
-    expect(subplebbit.edit).toHaveBeenCalledWith({
+    expect(community.edit).toHaveBeenCalledWith({
       features: { noDownvotes: true },
       settings: { fetchThumbnailUrls: false },
     })
@@ -300,11 +300,11 @@ describe('applyCommunityDefaultsToBoard', () => {
   })
 
   it('returns no-op when all defaults already exist', async () => {
-    const subplebbit = createMockSubplebbit({
+    const community = createMockCommunity({
       features: { noUpvotes: false, noDownvotes: true },
       settings: { fetchThumbnailUrls: false },
     })
-    const instance = createMockPlebbitInstance(subplebbit)
+    const instance = createMockPKCInstance(community)
     mockConnect.mockResolvedValue(instance)
 
     const result = await applyCommunityDefaultsToBoard('board.bso', 'ws://localhost:9138', {
@@ -316,14 +316,14 @@ describe('applyCommunityDefaultsToBoard', () => {
     })
 
     expect(result).toEqual({ applied: false, changedFields: [] })
-    expect(subplebbit.edit).not.toHaveBeenCalled()
+    expect(community.edit).not.toHaveBeenCalled()
     expect(instance.destroy).toHaveBeenCalledOnce()
   })
 
-  it('destroys plebbit instance even when subplebbit lookup fails', async () => {
-    const destroy = vi.fn<PlebbitInstance['destroy']>().mockResolvedValue(undefined)
-    const getSubplebbit = vi.fn<PlebbitInstance['getSubplebbit']>().mockRejectedValue(new Error('lookup failed'))
-    const instance = { getSubplebbit, destroy } as unknown as PlebbitInstance
+  it('destroys PKC instance even when community lookup fails', async () => {
+    const destroy = vi.fn<PKCInstance['destroy']>().mockResolvedValue(undefined)
+    const getCommunity = vi.fn<PKCInstance['getCommunity']>().mockRejectedValue(new Error('lookup failed'))
+    const instance = { getCommunity, destroy } as unknown as PKCInstance
     mockConnect.mockResolvedValue(instance)
 
     await expect(applyCommunityDefaultsToBoard('board.bso', 'ws://localhost:9138', {

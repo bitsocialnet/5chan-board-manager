@@ -67,7 +67,7 @@ export function formatPresetDisplay(address: string, entries: FlatPresetEntry[])
   lines.push('')
 
   if (boardEntries.length > 0) {
-    lines.push('  Board Settings (applied to subplebbit):')
+    lines.push('  Board Settings (applied to community):')
     for (const entry of boardEntries) {
       const padded = entry.dotPath.padEnd(maxPathLen)
       lines.push(`    ${padded}  ${formatValue(entry.value)}`)

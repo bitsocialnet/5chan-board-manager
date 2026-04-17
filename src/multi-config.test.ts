@@ -171,41 +171,41 @@ describe('loadMultiConfig', () => {
 })
 
 describe('resolveBoardManagerOptions', () => {
-  const envBackup = process.env.PLEBBIT_RPC_WS_URL
+  const envBackup = process.env.PKC_RPC_WS_URL
 
   afterEach(() => {
     if (envBackup === undefined) {
-      delete process.env.PLEBBIT_RPC_WS_URL
+      delete process.env.PKC_RPC_WS_URL
     } else {
-      process.env.PLEBBIT_RPC_WS_URL = envBackup
+      process.env.PKC_RPC_WS_URL = envBackup
     }
   })
 
   it('uses config rpcUrl over env var and default', () => {
-    process.env.PLEBBIT_RPC_WS_URL = 'ws://env:9138'
+    process.env.PKC_RPC_WS_URL = 'ws://env:9138'
     const board: BoardConfig = { address: 'a.bso' }
     const config: MultiBoardConfig = {
       rpcUrl: 'ws://config:9138',
       boards: [board],
     }
     const opts = resolveBoardManagerOptions(board, config, '/test/config')
-    expect(opts.plebbitRpcUrl).toBe('ws://config:9138')
+    expect(opts.pkcRpcUrl).toBe('ws://config:9138')
   })
 
   it('falls back to env var when rpcUrl not in config', () => {
-    process.env.PLEBBIT_RPC_WS_URL = 'ws://env:9138'
+    process.env.PKC_RPC_WS_URL = 'ws://env:9138'
     const board: BoardConfig = { address: 'a.bso' }
     const config: MultiBoardConfig = { boards: [board] }
     const opts = resolveBoardManagerOptions(board, config, '/test/config')
-    expect(opts.plebbitRpcUrl).toBe('ws://env:9138')
+    expect(opts.pkcRpcUrl).toBe('ws://env:9138')
   })
 
   it('falls back to default when neither config nor env var set', () => {
-    delete process.env.PLEBBIT_RPC_WS_URL
+    delete process.env.PKC_RPC_WS_URL
     const board: BoardConfig = { address: 'a.bso' }
     const config: MultiBoardConfig = { boards: [board] }
     const opts = resolveBoardManagerOptions(board, config, '/test/config')
-    expect(opts.plebbitRpcUrl).toBe('ws://localhost:9138')
+    expect(opts.pkcRpcUrl).toBe('ws://localhost:9138')
   })
 
   it('per-board values override defaults', () => {
@@ -238,11 +238,11 @@ describe('resolveBoardManagerOptions', () => {
     expect(opts.boardDir).toBe(join('/test/config', 'boards', 'a.bso'))
   })
 
-  it('sets subplebbitAddress from board address', () => {
+  it('sets communityAddress from board address', () => {
     const board: BoardConfig = { address: 'my-board.bso' }
     const config: MultiBoardConfig = { boards: [board] }
     const opts = resolveBoardManagerOptions(board, config, '/test/config')
-    expect(opts.subplebbitAddress).toBe('my-board.bso')
+    expect(opts.communityAddress).toBe('my-board.bso')
   })
 
   it('merges moderationReasons per-field: board overrides default', () => {
