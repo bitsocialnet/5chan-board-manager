@@ -1,6 +1,6 @@
 {
   "name": "5chan-board-manager",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "4chan-style thread auto-archiving and purging for pkc-js communities",
   "license": "GPL-3.0-or-later",
   "repository": {

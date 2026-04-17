@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.4](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.3...v0.2.4) (2026-04-17)
+
+### Features
+
+* **deps:** migrate from @plebbit/plebbit-js to @pkcprotocol/pkc-js ([7c05c39](https://github.com/bitsocialnet/5chan-board-manager/commit/7c05c39192d349be10c3ff3fc974b4a292c5d00b))
+
 ## [0.2.3](https://github.com/bitsocialhq/5chan-board-manager/compare/v0.2.2...v0.2.3) (2026-02-27)
 
 ### Bug Fixes
