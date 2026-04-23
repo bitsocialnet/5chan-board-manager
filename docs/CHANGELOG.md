@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.8](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.7...v0.2.8) (2026-04-23)
+
+### Bug Fixes
+
+* **preset:** replace captcha-canvas-v3 with spam-blocker challenge ([97a52b7](https://github.com/bitsocialnet/5chan-board-manager/commit/97a52b7865dad0d8db1f2dfdc6ec10802ef2c802))
+
 ## [0.2.7](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.6...v0.2.7) (2026-04-23)
 
 ### Bug Fixes
