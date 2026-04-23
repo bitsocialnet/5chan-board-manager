@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.7](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.6...v0.2.7) (2026-04-23)
+
+### Bug Fixes
+
+* **docker:** use PKC_RPC_AUTH_KEY env var for bitsocial-cli ([21458cf](https://github.com/bitsocialnet/5chan-board-manager/commit/21458cf0894f2d4bd72def13bddef46b119e83e2))
+
 ## [0.2.6](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.5...v0.2.6) (2026-04-23)
 
 ## [0.2.5](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.4...v0.2.5) (2026-04-17)
