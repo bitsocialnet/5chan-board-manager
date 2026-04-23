@@ -21,7 +21,7 @@ services:
     environment:
       # Fixed RPC auth key so 5chan board manager can connect without extracting it from logs.
       # Change this to your own random string (e.g.: openssl rand -base64 32 | tr -d '/+=')
-      - PLEBBIT_RPC_AUTH_KEY=TFCh0joRU60KwlfVaprP2uenw7NCdAwsBCF5UDoVg
+      - PKC_RPC_AUTH_KEY=TFCh0joRU60KwlfVaprP2uenw7NCdAwsBCF5UDoVg
     # Optional: increase UDP buffer limits for QUIC transport (used by Kubo/IPFS).
     # Uncomment if you are running Docker with root privileges.
     # sysctls:
@@ -44,7 +44,7 @@ services:
     volumes:
       - 5chan-data:/data
     environment:
-      # Must match PLEBBIT_RPC_AUTH_KEY on the bitsocial service above
+      # Must match PKC_RPC_AUTH_KEY on the bitsocial service above
       - PKC_RPC_WS_URL=ws://bitsocial:9138/TFCh0joRU60KwlfVaprP2uenw7NCdAwsBCF5UDoVg
 
 volumes:

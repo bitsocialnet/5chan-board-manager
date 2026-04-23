@@ -227,7 +227,7 @@ jobs:
       - name: Start bitsocial separately
         run: |
           docker run -d --name 5chan-bitsocial-cli -p 9138:9138 \
-            -e PLEBBIT_RPC_AUTH_KEY=ci-test-auth-key \
+            -e PKC_RPC_AUTH_KEY=ci-test-auth-key \
             ghcr.io/bitsocialnet/bitsocial-cli:latest
 
       - name: Wait for bitsocial RPC
