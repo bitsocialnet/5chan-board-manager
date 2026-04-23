@@ -5,7 +5,7 @@ import PKC from '@pkcprotocol/pkc-js'
 import { loadState } from '../src/state.js'
 import type { PKCInstance, Community, BoardManagerState, Page, ThreadComment } from '../src/types.js'
 
-export const RPC_URL = 'ws://localhost:9138'
+export const RPC_URL = process.env.PKC_RPC_WS_URL ?? 'ws://localhost:9138'
 
 export async function createPkcRpc(): Promise<PKCInstance> {
   return PKC({ pkcRpcClientsOptions: [RPC_URL] })

@@ -605,6 +605,28 @@ External services (archive.4plebs.org, desuarchive.org) independently scrape and
 
 `image_limit`, `max_filesize`, `max_comment_chars`, `cooldowns`, `spoilers`, `country_flags`, `user_ids`, `forced_anon`, etc.
 
+## Testing
+
+Unit tests run under Vitest:
+
+```bash
+npm test
+```
+
+End-to-end tests run the real board manager against a real PKC RPC server:
+
+```bash
+npm run test:e2e
+```
+
+The e2e suite spawns its own Kubo (IPFS) daemon on random ports and an in-process PKC RPC server on port `19138`. All state is written to temp directories that are removed at teardown. No `bitsocial-cli` or docker-compose stack needs to be running — Kubo is provided by the `kubo` npm package installed as a devDependency.
+
+To point the suite at an externally-running RPC instead (e.g. a long-lived docker-compose stack), set `PKC_RPC_WS_URL` before invoking the script — when set, global-setup skips spawning and uses the provided URL verbatim:
+
+```bash
+PKC_RPC_WS_URL=ws://localhost:9138/YOUR-AUTH-KEY npm run test:e2e
+```
+
 ## Differences from 4chan
 
 | Behavior | 4chan | This module |
