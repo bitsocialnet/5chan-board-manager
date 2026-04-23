@@ -75,6 +75,16 @@ All fields except each board's `address` are optional:
 
 
 
+## Installation
+
+Docker is the only supported install path. The published image
+(`ghcr.io/bitsocialnet/5chan-board-manager:latest`) is built and tested with the
+bitsocial-cli version the default preset assumes, including the
+`@bitsocial/spam-blocker-challenge` that the preset references. Running 5chan
+outside Docker — or against a bitsocial-cli you manage yourself — is possible
+but unsupported; you will have to keep the challenge and auth-key wiring in
+sync by hand (see [Standalone](#standalone-bitsocial-cli-already-running) below).
+
 ### Docker Compose (recommended)
 
 #### Full stack (with bitsocial-cli)
@@ -83,8 +93,14 @@ If you **don't** already have [bitsocial-cli](https://github.com/bitsocialnet/bi
 
 ```bash
 wget -O docker-compose.yml https://raw.githubusercontent.com/bitsocialnet/5chan-board-manager/master/docker-compose.example.yml
-# Add boards via 5chan board add (see Config Directory Layout above)
 docker compose up -d
+
+# Install the spam-blocker challenge referenced by the default preset
+# (skip this only if you also remove spam-blocker entries from your preset
+# or always use --skip-apply-defaults):
+docker compose exec bitsocial bitsocial challenge install @bitsocial/spam-blocker-challenge
+
+# Now add boards via 5chan board add (see Config Directory Layout above)
 ```
 
 See [`docker-compose.example.yml`](docker-compose.example.yml) for the full configuration.
@@ -103,6 +119,9 @@ Use this flow to create a new board with `bitsocial-cli` and immediately add it 
 ```bash
 wget -O docker-compose.yml https://raw.githubusercontent.com/bitsocialnet/5chan-board-manager/master/docker-compose.example.yml
 docker compose up -d
+
+# Install the spam-blocker challenge referenced by the default preset
+docker compose exec bitsocial bitsocial challenge install @bitsocial/spam-blocker-challenge
 
 # Create a community (copy the created address from output)
 docker compose exec bitsocial bitsocial community create \
@@ -133,6 +152,14 @@ Set `PKC_RPC_WS_URL` to the address of your existing instance, **including the a
 
 - **bitsocial-cli on the host (no container):** Use `ws://host.docker.internal:9138/YOUR-AUTH-KEY`. The example compose file includes `extra_hosts: ["host.docker.internal:host-gateway"]` so this works on Linux, macOS, and Windows.
 - **bitsocial-cli in another Docker container/network:** Use the container or service name, e.g. `ws://bitsocial:9138/YOUR-AUTH-KEY`, and make sure both containers share the same Docker network.
+
+**You must install the spam-blocker challenge on your bitsocial-cli instance**, because the default preset (`src/presets/community-defaults.jsonc`) references it and `5chan board add --apply-defaults` will be rejected by the PKC RPC server if the challenge is missing:
+
+```bash
+bitsocial challenge install @bitsocial/spam-blocker-challenge
+```
+
+If you do not want this dependency, remove both `@bitsocial/spam-blocker-challenge` entries from your preset (they are marked optional in the file) or use `--skip-apply-defaults`.
 
 See [`docker-compose.standalone.example.yml`](docker-compose.standalone.example.yml) for the configuration.
 

@@ -2,8 +2,11 @@
 #
 # Quick start:
 #   cp docker-compose.example.yml docker-compose.yml
-#   # Edit /path/to/config.json with your boards (see README.md)
 #   docker compose up -d
+#   # Install the spam-blocker challenge referenced by the default preset
+#   # (without it, `5chan board add --apply-defaults` is rejected by the RPC server):
+#   docker compose exec bitsocial bitsocial challenge install @bitsocial/spam-blocker-challenge
+#   # Now add boards via 5chan board add (see README.md)
 #
 # View logs:
 #   docker compose logs -f 5chan

@@ -97,19 +97,21 @@
             },
           ],
         },
+        // The two entries below use Bitsocial's spam-blocker challenge, which is
+        // strictly optional — it relies on a hosted service (Cloudflare Turnstile
+        // challenges plus IP-reputation scoring via https://spamblocker.bitsocial.net).
+        // If the board owner does not want to depend on that external service, both
+        // entries can be removed; the "fail" entries above still provide brute-force
+        // and commentEdit protection. Before applying this preset, install the
+        // challenge in bitsocial-cli:
+        //   bitsocial challenge install @bitsocial/spam-blocker-challenge
         {
-          // Post captcha gate.
-          // Untrusted users or trusted users exceeding rate limit must solve captcha
-          // and go to pending approval.
-          "name": "captcha-canvas-v3",
-          "description": "Post captcha for untrusted or rate-exceeded users.",
+          // Post spam-blocker gate.
+          // Untrusted users or trusted users exceeding rate limit get risk-scored;
+          // borderline scores present a Cloudflare challenge and go to pending approval.
+          "name": "@bitsocial/spam-blocker-challenge",
+          "description": "Post spam-blocker for untrusted or rate-exceeded users.",
           "pendingApproval": true,
-          "options": {
-            "characters": "6",
-            "width": "280",
-            "height": "96",
-            "colors": "#2f9e44,#1c7ed6,#e8590c",
-          },
           "exclude": [
             // Only for posts.
             { "publicationType": { "reply": true } },
@@ -118,7 +120,7 @@
             { "role": ["moderator", "admin", "owner"] },
 
             // Trusted bypass requires sustained activity + account age + under rate limit.
-            // If rate limit is exceeded, trust bypass stops matching and captcha+pending kicks in.
+            // If rate limit is exceeded, trust bypass stops matching and the challenge kicks in.
             {
               "postCount": 10,
               "firstCommentTimestamp": 604800,
@@ -134,18 +136,12 @@
           ],
         },
         {
-          // Reply captcha gate.
-          // Untrusted users or trusted users exceeding rate limit must solve captcha;
-          // replies go to pending approval.
-          "name": "captcha-canvas-v3",
-          "description": "Reply captcha for untrusted or rate-exceeded users.",
+          // Reply spam-blocker gate.
+          // Untrusted users or trusted users exceeding rate limit get risk-scored;
+          // borderline scores present a Cloudflare challenge and go to pending approval.
+          "name": "@bitsocial/spam-blocker-challenge",
+          "description": "Reply spam-blocker for untrusted or rate-exceeded users.",
           "pendingApproval": true,
-          "options": {
-            "characters": "5",
-            "width": "260",
-            "height": "90",
-            "colors": "#2f9e44,#1c7ed6,#e8590c",
-          },
           "exclude": [
             // Only for replies.
             { "publicationType": { "post": true } },
@@ -154,8 +150,8 @@
             { "role": ["moderator", "admin", "owner"] },
 
             // Trusted bypass requires activity + account age + under rate limit.
-            // Thresholds match post captcha since reply flooding via sybil accounts
-            // is the most practical spam vector.
+            // Higher rate limit than posts since replies are lower-impact, but
+            // reply flooding via sybil accounts is still a practical spam vector.
             {
               "postCount": 10,
               "firstCommentTimestamp": 604800,

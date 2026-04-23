@@ -6,6 +6,13 @@
 #   # Create /data/config.json with your boards (see README.md)
 #   docker compose up -d
 #
+# IMPORTANT: the default preset (src/presets/community-defaults.jsonc) references
+# @bitsocial/spam-blocker-challenge. If you plan to use `5chan board add
+# --apply-defaults`, install the challenge on your bitsocial-cli instance first:
+#   bitsocial challenge install @bitsocial/spam-blocker-challenge
+# Otherwise remove both spam-blocker entries from your preset (they are marked
+# optional in the file) or pass --skip-apply-defaults.
+#
 # View logs:
 #   docker compose logs -f 5chan
 
