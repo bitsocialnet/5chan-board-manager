@@ -1,5 +1,6 @@
-import { watch, mkdirSync, type FSWatcher } from 'node:fs'
+import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+import chokidar, { type FSWatcher } from 'chokidar'
 import Logger from '@pkcprotocol/pkc-logger'
 import { startBoardManager } from './board-manager.js'
 import { loadConfig, globalConfigPath, renameBoardConfig } from './config-manager.js'
@@ -181,18 +182,38 @@ export async function startBoardManagers(
     }, 200)
   }
 
-  // Watch boards/ directory — ensure it exists so the watcher works on first run
+  // Watch boards/ directory via chokidar — manages per-subdirectory inotify
+  // watches explicitly, avoiding the native fs.watch recursive race where
+  // events for files created inside brand-new subdirectories can be lost.
   const boardsDir = join(configDir, 'boards')
   mkdirSync(boardsDir, { recursive: true })
-  watchers.push(watch(boardsDir, { recursive: true }, triggerReload))
+  const boardsWatcher = chokidar.watch(boardsDir, {
+    ignoreInitial: true,
+    persistent: true,
+    awaitWriteFinish: {
+      stabilityThreshold: 100,
+      pollInterval: 50,
+    },
+  })
+  boardsWatcher.on('all', triggerReload)
+  watchers.push(boardsWatcher)
 
-  // Watch global.json
+  // Watch global.json — chokidar tolerates the file not existing yet
   const globalPath = globalConfigPath(configDir)
-  try {
-    watchers.push(watch(globalPath, triggerReload))
-  } catch {
-    log(`global.json does not exist yet, skipping watch`)
-  }
+  const globalWatcher = chokidar.watch(globalPath, {
+    ignoreInitial: true,
+    persistent: true,
+  })
+  globalWatcher.on('all', triggerReload)
+  watchers.push(globalWatcher)
+
+  // Chokidar installs inotify watches asynchronously; wait until both are
+  // fully ready so callers observing hot-reload immediately after this
+  // function returns don't race the watcher setup.
+  await Promise.all([
+    new Promise<void>((resolve) => boardsWatcher.once('ready', () => resolve())),
+    new Promise<void>((resolve) => globalWatcher.once('ready', () => resolve())),
+  ])
 
   return {
     get boardManagers() {
@@ -204,9 +225,7 @@ export async function startBoardManagers(
     async stop() {
       stopped = true
       if (debounceTimer) clearTimeout(debounceTimer)
-      for (const w of watchers) {
-        w.close()
-      }
+      await Promise.all(watchers.map((w) => w.close()))
       const results = await Promise.allSettled(
         [...boardManagers.entries()].map(async ([address, manager]) => {
           try {

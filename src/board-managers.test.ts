@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync, existsSync
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { startBoardManagers } from './board-managers.js'
+import { saveBoardConfig } from './config-manager.js'
 import type { BoardManagerOptions, BoardManagerResult, MultiBoardConfig } from './types.js'
 
 vi.mock('./board-manager.js', () => ({
@@ -301,6 +302,32 @@ describe('startBoardManagers', () => {
       expect(manager.boardManagers.has('a.bso')).toBe(false)
       expect(manager.errors.size).toBe(1)
       expect(manager.errors.get('a.bso')?.message).toBe('restart failed')
+
+      await manager.stop()
+    })
+
+    it('picks up boards added via saveBoardConfig (real atomic-write path)', async () => {
+      // Regression test for the Linux recursive fs.watch race: when `5chan board add`
+      // creates `boards/<addr>/` and writes `config.json` back-to-back, the inotify
+      // event for the inner file can be lost because the recursive watch on the
+      // newly-created subdirectory is registered asynchronously. This test exercises
+      // the exact atomic-write path (mkdir → write .tmp → rename) that the CLI uses,
+      // so it fails under native fs.watch on affected systems and passes under
+      // chokidar (which manages per-subdir watches explicitly).
+      const stopNew = makeStopFn()
+      mockStartBoardManager.mockResolvedValueOnce({ stop: stopNew })
+
+      const dir = tmpDir()
+      const manager = await startBoardManagers(dir, { boards: [] })
+      expect(manager.boardManagers.size).toBe(0)
+
+      saveBoardConfig(dir, { address: 'new.bso' })
+
+      // Wait for debounce + chokidar awaitWriteFinish + handleConfigChange
+      await new Promise((r) => setTimeout(r, 600))
+
+      expect(manager.boardManagers.size).toBe(1)
+      expect(manager.boardManagers.has('new.bso')).toBe(true)
 
       await manager.stop()
     })
