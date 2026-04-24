@@ -48,6 +48,7 @@ USER 5chan
 
 ENV XDG_DATA_HOME=/data
 ENV XDG_CONFIG_HOME=/data
+ENV XDG_STATE_HOME=/data
 ENV EDITOR=nano
 
 VOLUME ["/data"]

@@ -240,6 +240,7 @@ The bundled preset file is `src/presets/community-defaults.jsonc`.
 * [`5chan board remove ADDRESS`](#5chan-board-remove-address)
 * [`5chan defaults set`](#5chan-defaults-set)
 * [`5chan help [COMMAND]`](#5chan-help-command)
+* [`5chan logs`](#5chan-logs)
 * [`5chan start`](#5chan-start)
 
 ## `5chan board add ADDRESS`
@@ -448,16 +449,74 @@ DESCRIPTION
 
 _See code: [@oclif/plugin-help](https://github.com/oclif/plugin-help/blob/v6.2.37/src/commands/help.ts)_
 
+## `5chan logs`
+
+View the latest 5chan daemon log file.
+
+```
+USAGE
+  $ 5chan logs [-f] [-n <value>] [--since <value>] [--until <value>] [--logPath <value>]
+    [--stdout | --stderr]
+
+FLAGS
+  -f, --follow            Follow log output in real-time (like tail -f)
+  -n, --tail=<value>      [default: all] Number of log entries to show from the end. Use "all" to show everything.
+      --logPath=<value>   Specify the directory containing log files
+      --since=<value>     Show logs since timestamp (ISO 8601, e.g. 2026-01-02T13:23:37Z) or relative time (e.g. 30s, 42m, 2h, 1d)
+      --until=<value>     Show logs before timestamp (ISO 8601 or relative time)
+      --stdout            Show only stdout log entries
+      --stderr            Show only stderr log entries (output of pkc-logger library)
+
+DESCRIPTION
+  View the latest 5chan daemon log file. By default dumps the full log and exits.
+  Use --follow to stream new output in real-time (like tail -f).
+
+EXAMPLES
+  $ 5chan logs
+
+  $ 5chan logs -f
+
+  $ 5chan logs -n 50
+
+  $ 5chan logs --since 5m
+
+  $ 5chan logs --since 2026-01-02T13:23:37Z --until 2026-01-02T14:00:00Z
+
+  $ 5chan logs --since 1h -f
+
+  $ 5chan logs --stdout
+
+  $ 5chan logs --stderr
+
+  $ 5chan logs --stdout -f
+```
+
+Inside Docker:
+
+```bash
+# Dump the latest log file
+docker compose exec 5chan 5chan logs
+
+# Stream new log lines in real-time
+docker compose exec 5chan 5chan logs -f
+
+# Show only debug output from pkc-logger (stderr)
+docker compose exec 5chan 5chan logs --stderr -f
+```
+
+_See code: [src/commands/logs.ts](https://github.com/bitsocialnet/5chan-board-manager/blob/v0.2.8/src/commands/logs.ts)_
+
 ## `5chan start`
 
 Start board managers for all configured boards
 
 ```
 USAGE
-  $ 5chan start [-c <value>]
+  $ 5chan start [-c <value>] [--log-path <value>]
 
 FLAGS
   -c, --config-dir=<value>  Path to config directory (overrides default)
+      --log-path=<value>    Directory to store daemon log files
 
 DESCRIPTION
   Start board managers for all configured boards
@@ -471,10 +530,15 @@ DESCRIPTION
   The config directory is watched for changes; boards are hot-reloaded
   (added, removed, or restarted) without requiring a full restart.
 
+  Daemon output is written to a rotated log file (see `5chan logs`). stderr is
+  suppressed on the terminal; real uncaught errors still reach the terminal.
+
 EXAMPLES
   $ 5chan start
 
   $ 5chan start --config-dir /path/to/config
+
+  $ 5chan start --log-path /var/log/5chan
 ```
 
 _See code: [src/commands/start.ts](https://github.com/bitsocialnet/5chan-board-manager/blob/v0.2.9/src/commands/start.ts)_
@@ -570,7 +634,24 @@ Uses `pkc-logger` (same logger as the pkc-js ecosystem). Key events logged:
 - Mod role auto-added
 - Errors
 
-**Docker:** Debug logging (`DEBUG=5chan:*`) is enabled by default in the Docker image, so `docker logs` shows the full pkc-logger output. To silence it, override the variable:
+**Daemon log file.** When `5chan start` runs, stdout and stderr are captured to a
+rotated log file under `$XDG_STATE_HOME/5chan/log/` (inside Docker: `/data/5chan/log/`).
+Each entry is prefixed with `[ISO-timestamp] [stdout|stderr]`. At most 5 files are
+retained; the oldest is deleted on each restart. Each file is capped at 20MB.
+
+stderr is suppressed on the terminal — only real uncaught errors reach it. Use
+`5chan logs` (or `5chan logs -f`) to view daemon output:
+
+```bash
+docker compose exec 5chan 5chan logs        # dump latest log
+docker compose exec 5chan 5chan logs -f     # stream live
+docker compose exec 5chan 5chan logs --stderr -f   # only pkc-logger output
+```
+
+**Docker:** Debug logging (`DEBUG=5chan:*`) is enabled by default in the Docker image.
+Because stderr is no longer teed to the terminal, `docker logs` will be quieter than
+before — use `5chan logs` to see the full debug stream. To silence the log file as
+well, override the variable to empty:
 
 ```bash
 docker run -e DEBUG= 5chan-board-manager
@@ -581,6 +662,13 @@ Or in `docker-compose.yml`:
 ```yaml
 environment:
   DEBUG: ""
+```
+
+To broaden the captured namespaces (e.g. to include pkc-js events), widen `DEBUG`:
+
+```yaml
+environment:
+  DEBUG: "5chan:*,pkc*,pkc-js*"
 ```
 
 ## 4chan Board Behavior Reference

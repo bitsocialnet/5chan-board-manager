@@ -51,6 +51,8 @@
     "@oclif/plugin-help": "6.2.37",
     "@pkcprotocol/pkc-js": "0.0.20",
     "chokidar": "5.0.0",
+    "debug": "^4.4.3",
+    "env-paths": "^3.0.0",
     "strip-json-comments": "5.0.3",
     "zod": "4.3.6"
   },
@@ -58,6 +60,7 @@
     "@commitlint/cli": "20.4.1",
     "@commitlint/config-conventional": "20.4.1",
     "@release-it/conventional-changelog": "10.0.5",
+    "@types/debug": "^4.1.13",
     "commitizen": "4.3.1",
     "cz-conventional-changelog": "3.3.0",
     "husky": "9.1.7",
