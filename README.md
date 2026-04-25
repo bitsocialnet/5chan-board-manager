@@ -303,7 +303,7 @@ EXAMPLES
   $ 5chan board add my-board.bso --apply-defaults --defaults-preset ./my-preset.json
 ```
 
-_See code: [src/commands/board/add.ts](https://github.com/bitsocialnet/5chan-board-manager/blob/v0.2.9/src/commands/board/add.ts)_
+_See code: [src/commands/board/add.ts](https://github.com/bitsocialnet/5chan-board-manager/blob/v0.2.10/src/commands/board/add.ts)_
 
 ## `5chan board edit ADDRESS`
 
@@ -350,7 +350,7 @@ EXAMPLES
   $ 5chan board edit random.bso -i
 ```
 
-_See code: [src/commands/board/edit.ts](https://github.com/bitsocialnet/5chan-board-manager/blob/v0.2.9/src/commands/board/edit.ts)_
+_See code: [src/commands/board/edit.ts](https://github.com/bitsocialnet/5chan-board-manager/blob/v0.2.10/src/commands/board/edit.ts)_
 
 ## `5chan board list`
 
@@ -367,7 +367,7 @@ EXAMPLES
   $ 5chan board list
 ```
 
-_See code: [src/commands/board/list.ts](https://github.com/bitsocialnet/5chan-board-manager/blob/v0.2.9/src/commands/board/list.ts)_
+_See code: [src/commands/board/list.ts](https://github.com/bitsocialnet/5chan-board-manager/blob/v0.2.10/src/commands/board/list.ts)_
 
 ## `5chan board remove ADDRESS`
 
@@ -387,7 +387,7 @@ EXAMPLES
   $ 5chan board remove random.bso
 ```
 
-_See code: [src/commands/board/remove.ts](https://github.com/bitsocialnet/5chan-board-manager/blob/v0.2.9/src/commands/board/remove.ts)_
+_See code: [src/commands/board/remove.ts](https://github.com/bitsocialnet/5chan-board-manager/blob/v0.2.10/src/commands/board/remove.ts)_
 
 ## `5chan defaults set`
 
@@ -427,7 +427,7 @@ EXAMPLES
   $ 5chan defaults set -i
 ```
 
-_See code: [src/commands/defaults/set.ts](https://github.com/bitsocialnet/5chan-board-manager/blob/v0.2.9/src/commands/defaults/set.ts)_
+_See code: [src/commands/defaults/set.ts](https://github.com/bitsocialnet/5chan-board-manager/blob/v0.2.10/src/commands/defaults/set.ts)_
 
 ## `5chan help [COMMAND]`
 
@@ -451,25 +451,27 @@ _See code: [@oclif/plugin-help](https://github.com/oclif/plugin-help/blob/v6.2.3
 
 ## `5chan logs`
 
-View the latest 5chan daemon log file.
+View the latest 5chan daemon log file. By default dumps the full log and exits. Use --follow to stream new output in real-time (like tail -f).
 
 ```
 USAGE
-  $ 5chan logs [-f] [-n <value>] [--since <value>] [--until <value>] [--logPath <value>]
-    [--stdout | --stderr]
+  $ 5chan logs [-f] [-n <value>] [--since <value>] [--until <value>] [--logPath <value>] [--stdout |
+    --stderr]
 
 FLAGS
-  -f, --follow            Follow log output in real-time (like tail -f)
-  -n, --tail=<value>      [default: all] Number of log entries to show from the end. Use "all" to show everything.
-      --logPath=<value>   Specify the directory containing log files
-      --since=<value>     Show logs since timestamp (ISO 8601, e.g. 2026-01-02T13:23:37Z) or relative time (e.g. 30s, 42m, 2h, 1d)
-      --until=<value>     Show logs before timestamp (ISO 8601 or relative time)
-      --stdout            Show only stdout log entries
-      --stderr            Show only stderr log entries (output of pkc-logger library)
+  -f, --follow           Follow log output in real-time (like tail -f)
+  -n, --tail=<value>     [default: all] Number of log entries to show from the end. Use "all" to show everything.
+      --logPath=<value>  Specify the directory containing log files
+      --since=<value>    Show logs since timestamp (ISO 8601, e.g. 2026-01-02T13:23:37Z) or relative time (e.g. 30s,
+                         42m, 2h, 1d)
+      --stderr           Show only stderr log entries (output of pkc-logger library)
+      --stdout           Show only stdout log entries
+      --until=<value>    Show logs before timestamp (ISO 8601, e.g. 2026-01-02T13:23:37Z) or relative time (e.g. 30s,
+                         42m, 2h, 1d)
 
 DESCRIPTION
-  View the latest 5chan daemon log file. By default dumps the full log and exits.
-  Use --follow to stream new output in real-time (like tail -f).
+  View the latest 5chan daemon log file. By default dumps the full log and exits. Use --follow to stream new output in
+  real-time (like tail -f).
 
 EXAMPLES
   $ 5chan logs
@@ -491,20 +493,7 @@ EXAMPLES
   $ 5chan logs --stdout -f
 ```
 
-Inside Docker:
-
-```bash
-# Dump the latest log file
-docker compose exec 5chan 5chan logs
-
-# Stream new log lines in real-time
-docker compose exec 5chan 5chan logs -f
-
-# Show only debug output from pkc-logger (stderr)
-docker compose exec 5chan 5chan logs --stderr -f
-```
-
-_See code: [src/commands/logs.ts](https://github.com/bitsocialnet/5chan-board-manager/blob/v0.2.8/src/commands/logs.ts)_
+_See code: [src/commands/logs.ts](https://github.com/bitsocialnet/5chan-board-manager/blob/v0.2.10/src/commands/logs.ts)_
 
 ## `5chan start`
 
@@ -516,7 +505,7 @@ USAGE
 
 FLAGS
   -c, --config-dir=<value>  Path to config directory (overrides default)
-      --log-path=<value>    Directory to store daemon log files
+      --log-path=<value>    [default: /home/runner/.local/state/5chan] Directory to store daemon log files
 
 DESCRIPTION
   Start board managers for all configured boards
@@ -530,8 +519,9 @@ DESCRIPTION
   The config directory is watched for changes; boards are hot-reloaded
   (added, removed, or restarted) without requiring a full restart.
 
-  Daemon output is written to a rotated log file (see `5chan logs`). stderr is
-  suppressed on the terminal; real uncaught errors still reach the terminal.
+  Daemon output is written to a rotated log file (default: /home/runner/.local/state/5chan).
+  View it with `5chan logs`. stderr is suppressed on the terminal; real
+  uncaught errors still reach the terminal.
 
 EXAMPLES
   $ 5chan start
@@ -541,7 +531,7 @@ EXAMPLES
   $ 5chan start --log-path /var/log/5chan
 ```
 
-_See code: [src/commands/start.ts](https://github.com/bitsocialnet/5chan-board-manager/blob/v0.2.9/src/commands/start.ts)_
+_See code: [src/commands/start.ts](https://github.com/bitsocialnet/5chan-board-manager/blob/v0.2.10/src/commands/start.ts)_
 <!-- commandsstop -->
 
 ## Config Hot-Reload

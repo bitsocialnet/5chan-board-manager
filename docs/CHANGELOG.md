@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.2.10](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.9...v0.2.10) (2026-04-25)
+
+### Features
+
+* **cli:** add `5chan logs` command for viewing daemon logs ([56bb753](https://github.com/bitsocialnet/5chan-board-manager/commit/56bb753eab35a6cf56fb3d0b99bc0f13ab0a1883))
+
+### Bug Fixes
+
+* **hot-reload:** swap fs.watch for chokidar to avoid Linux recursion race ([defe348](https://github.com/bitsocialnet/5chan-board-manager/commit/defe3487d6f5954aebd0c38124750d2c362bff51))
+
 ## [0.2.9](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.8...v0.2.9) (2026-04-24)
 
 ## [0.2.8](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.7...v0.2.8) (2026-04-23)
