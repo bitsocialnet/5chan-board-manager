@@ -88,8 +88,8 @@ async function runCommand(
     stderr += String(warnArgs[0]) + '\n'
   }) as typeof cmd.warn
   ;(cmd as unknown as { isInteractive: () => boolean }).isInteractive = () => options.interactive ?? true
-  ;(cmd as unknown as { promptInteractiveDefaults: (address: string, preset: CommunityDefaultsPreset, rawJsonc: string) => Promise<CommunityDefaultsPreset | 'skip'> }).promptInteractiveDefaults = async (
-    _address: string,
+  ;(cmd as unknown as { promptInteractiveDefaults: (addresses: string[], preset: CommunityDefaultsPreset, rawJsonc: string) => Promise<CommunityDefaultsPreset | 'skip'> }).promptInteractiveDefaults = async (
+    _addresses: string[],
     preset: CommunityDefaultsPreset,
     _rawJsonc: string,
   ) => options.interactiveResult ?? preset
@@ -399,5 +399,128 @@ describe('board add command', () => {
     const dir = tmpDir()
 
     await expect(runCommand(['new.bso', '--title', 'My Board'], dir)).rejects.toThrow('5chan settings')
+  })
+
+  describe('multiple addresses', () => {
+    it('adds multiple boards in one invocation', async () => {
+      const dir = tmpDir()
+      await runCommand(['a.bso', 'b.bso', 'c.bso'], dir)
+
+      const config = loadConfig(dir)
+      expect(config.boards.map((b) => b.address).sort()).toEqual(['a.bso', 'b.bso', 'c.bso'])
+    })
+
+    it('validates every supplied address with the same rpc url', async () => {
+      const dir = tmpDir()
+      await runCommand(
+        ['a.bso', 'b.bso', 'c.bso', '--apply-defaults', '--rpc-url', 'ws://x:1'],
+        dir,
+        { interactive: false },
+      )
+
+      expect(mockValidate.mock.calls.map((c) => c[0])).toEqual(['a.bso', 'b.bso', 'c.bso'])
+      expect(mockValidate.mock.calls.every((c) => c[1] === 'ws://x:1')).toBe(true)
+    })
+
+    it('applies defaults to every supplied address', async () => {
+      const dir = tmpDir()
+      await runCommand(
+        ['a.bso', 'b.bso', '--apply-defaults'],
+        dir,
+        { interactive: false },
+      )
+
+      expect(mockApplyDefaults).toHaveBeenCalledTimes(2)
+      expect(mockApplyDefaults.mock.calls.map((c) => c[0])).toEqual(['a.bso', 'b.bso'])
+    })
+
+    it('writes the same per-flag overrides to every board', async () => {
+      const dir = tmpDir()
+      await runCommand(
+        ['a.bso', 'b.bso', '--per-page', '99', '--skip-apply-defaults'],
+        dir,
+        { interactive: false },
+      )
+
+      const config = loadConfig(dir)
+      const a = config.boards.find((b) => b.address === 'a.bso')
+      const b = config.boards.find((b) => b.address === 'b.bso')
+      expect(a?.perPage).toBe(99)
+      expect(b?.perPage).toBe(99)
+    })
+
+    it('errors when the supplied list contains duplicates', async () => {
+      const dir = tmpDir()
+      await expect(
+        runCommand(['a.bso', 'a.bso'], dir, { interactive: false }),
+      ).rejects.toThrow('Duplicate address in arguments: "a.bso"')
+      expect(mockValidate).not.toHaveBeenCalled()
+      expect(mockApplyDefaults).not.toHaveBeenCalled()
+    })
+
+    it('errors and writes nothing when any address already exists', async () => {
+      const dir = tmpDir()
+      writeBoardConfig(dir, { address: 'b.bso' })
+
+      await expect(
+        runCommand(['a.bso', 'b.bso', 'c.bso', '--apply-defaults'], dir, { interactive: false }),
+      ).rejects.toThrow('"b.bso" already exists')
+
+      const config = loadConfig(dir)
+      expect(config.boards.map((b) => b.address)).toEqual(['b.bso'])
+      expect(mockApplyDefaults).not.toHaveBeenCalled()
+    })
+
+    it('lists every existing conflict in the error message', async () => {
+      const dir = tmpDir()
+      writeBoardConfig(dir, { address: 'a.bso' })
+      writeBoardConfig(dir, { address: 'c.bso' })
+
+      await expect(
+        runCommand(['a.bso', 'b.bso', 'c.bso', '--apply-defaults'], dir, { interactive: false }),
+      ).rejects.toThrow(/"a\.bso", "c\.bso" already exist/)
+    })
+
+    it('aborts adding remaining boards if applying defaults fails midway', async () => {
+      const dir = tmpDir()
+      mockApplyDefaults.mockReset()
+      mockApplyDefaults
+        .mockResolvedValueOnce({ applied: true, changedFields: ['features'] })
+        .mockRejectedValueOnce(new Error('rpc broke'))
+
+      await expect(
+        runCommand(['a.bso', 'b.bso', 'c.bso', '--apply-defaults'], dir, { interactive: false }),
+      ).rejects.toThrow('rpc broke')
+
+      const config = loadConfig(dir)
+      // a.bso was saved before the failure; b.bso and c.bso were not
+      expect(config.boards.map((b) => b.address)).toEqual(['a.bso'])
+    })
+
+    it('shows a single interactive prompt covering every address', async () => {
+      const dir = tmpDir()
+      const promptSpy = vi.fn(async (_addresses: string[], preset: CommunityDefaultsPreset) => preset)
+
+      const cmd = new BoardAdd(['a.bso', 'b.bso'], {} as never)
+      Object.defineProperty(cmd, 'config', {
+        value: {
+          configDir: dir,
+          runHook: async () => ({ successes: [], failures: [] }),
+        },
+      })
+      cmd.log = () => {}
+      ;(cmd as unknown as { isInteractive: () => boolean }).isInteractive = () => true
+      ;(cmd as unknown as { promptInteractiveDefaults: typeof promptSpy }).promptInteractiveDefaults = promptSpy
+
+      await cmd.run()
+
+      expect(promptSpy).toHaveBeenCalledTimes(1)
+      expect(promptSpy.mock.calls[0][0]).toEqual(['a.bso', 'b.bso'])
+    })
+
+    it('errors if no address is supplied', async () => {
+      const dir = tmpDir()
+      await expect(runCommand([], dir, { interactive: false })).rejects.toThrow()
+    })
   })
 })

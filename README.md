@@ -245,16 +245,16 @@ The bundled preset file is `src/presets/community-defaults.jsonc`.
 
 ## `5chan board add ADDRESS`
 
-Add a board to the config
+Add one or more boards to the config
 
 ```
 USAGE
-  $ 5chan board add ADDRESS [--rpc-url <value>] [--per-page <value>] [--pages <value>] [--bump-limit <value>]
-    [--archive-purge-seconds <value>] [--apply-defaults] [--skip-apply-defaults] [--interactive-apply-defaults]
+  $ 5chan board add ADDRESS... [--rpc-url <value>] [--per-page <value>] [--pages <value>] [--bump-limit
+    <value>] [--archive-purge-seconds <value>] [--apply-defaults] [--skip-apply-defaults] [--interactive-apply-defaults]
     [--defaults-preset <value>]
 
 ARGUMENTS
-  ADDRESS  Board address to add
+  ADDRESS...  Board address(es) to add (one or more, space-separated)
 
 FLAGS
   --apply-defaults                 Apply preset defaults silently (no prompts)
@@ -269,7 +269,12 @@ FLAGS
   --skip-apply-defaults            Skip applying preset defaults
 
 DESCRIPTION
-  Add a board to the config
+  Add one or more boards to the config
+
+  Multiple addresses may be supplied space-separated; the same defaults decision
+  and preset are applied to each. All addresses are validated and checked for
+  conflicts up front, so nothing is written if any address is invalid or already
+  present.
 
   Preset defaults behavior:
   --apply-defaults              Apply all preset defaults silently (no prompts)
@@ -288,6 +293,8 @@ DESCRIPTION
 EXAMPLES
   $ 5chan board add random.bso
 
+  $ 5chan board add random.bso tech.bso flash.bso
+
   $ 5chan board add tech.bso --bump-limit 500
 
   $ 5chan board add flash.bso --per-page 30 --pages 1
@@ -295,6 +302,8 @@ EXAMPLES
   $ 5chan board add my-board.bso --rpc-url ws://custom-host:9138
 
   $ 5chan board add my-board.bso --apply-defaults
+
+  $ 5chan board add my-board.bso other-board.bso --apply-defaults
 
   $ 5chan board add my-board.bso --skip-apply-defaults
 

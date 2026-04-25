@@ -20,14 +20,21 @@ import { flattenPreset, formatPresetDisplay, openPresetInEditor, parsePresetJson
 type ApplyDefaultsDecision = 'apply' | 'skip' | 'interactive'
 
 export default class BoardAdd extends Command {
+  static override strict = false
+
   static override args = {
     address: Args.string({
-      description: 'Board address to add',
+      description: 'Board address(es) to add (one or more, space-separated)',
       required: true,
     }),
   }
 
-  static override description = `Add a board to the config
+  static override description = `Add one or more boards to the config
+
+Multiple addresses may be supplied space-separated; the same defaults decision
+and preset are applied to each. All addresses are validated and checked for
+conflicts up front, so nothing is written if any address is invalid or already
+present.
 
 Preset defaults behavior:
   --apply-defaults              Apply all preset defaults silently (no prompts)
@@ -45,10 +52,12 @@ https://github.com/bitsocialnet/bitsocial-cli#bitsocial-community-edit-address`
 
   static override examples = [
     '5chan board add random.bso',
+    '5chan board add random.bso tech.bso flash.bso',
     '5chan board add tech.bso --bump-limit 500',
     '5chan board add flash.bso --per-page 30 --pages 1',
     '5chan board add my-board.bso --rpc-url ws://custom-host:9138',
     '5chan board add my-board.bso --apply-defaults',
+    '5chan board add my-board.bso other-board.bso --apply-defaults',
     '5chan board add my-board.bso --skip-apply-defaults',
     '5chan board add my-board.bso --interactive-apply-defaults',
     '5chan board add my-board.bso --apply-defaults --defaults-preset ./my-preset.json',
@@ -124,12 +133,13 @@ https://github.com/bitsocialnet/bitsocial-cli#bitsocial-community-edit-address`
   }
 
   protected async promptInteractiveDefaults(
-    address: string,
+    addresses: string[],
     preset: CommunityDefaultsPreset,
     rawJsonc: string,
   ): Promise<CommunityDefaultsPreset | 'skip'> {
     const entries = flattenPreset(preset)
-    const display = formatPresetDisplay(address, entries)
+    const label = addresses.join(', ')
+    const display = formatPresetDisplay(label, entries)
     this.log(display)
     this.log('')
 
@@ -208,15 +218,30 @@ https://github.com/bitsocialnet/bitsocial-cli#bitsocial-community-edit-address`
   }
 
   async run(): Promise<void> {
-    const { args, flags } = await this.parseWithUnknownFlagCheck()
+    const { argv, flags } = await this.parseWithUnknownFlagCheck()
     const configDir = this.config.configDir
 
-    await validateBoardAddress(args.address, flags['rpc-url'])
+    const addresses = argv as string[]
 
-    // Early duplicate check — fail before interactive prompts or RPC edits
+    const seen = new Set<string>()
+    for (const address of addresses) {
+      if (seen.has(address)) {
+        this.error(`Duplicate address in arguments: "${address}"`)
+      }
+      seen.add(address)
+    }
+
+    for (const address of addresses) {
+      await validateBoardAddress(address, flags['rpc-url'])
+    }
+
     const config = loadConfig(configDir)
-    if (config.boards.some((b) => b.address === args.address)) {
-      this.error(`Board "${args.address}" already exists in config`)
+    const existingAddresses = new Set(config.boards.map((b) => b.address))
+    const conflicts = addresses.filter((a) => existingAddresses.has(a))
+    if (conflicts.length > 0) {
+      const list = conflicts.map((a) => `"${a}"`).join(', ')
+      const verb = conflicts.length === 1 ? 'already exists' : 'already exist'
+      this.error(`Board ${list} ${verb} in config`)
     }
 
     const basePresetRaw = loadCommunityDefaultsPresetRaw(
@@ -237,43 +262,45 @@ https://github.com/bitsocialnet/bitsocial-cli#bitsocial-community-edit-address`
     if (decision === 'apply') {
       preset = basePreset
     } else if (decision === 'interactive') {
-      const result = await this.promptInteractiveDefaults(args.address, basePreset, basePresetRaw)
+      const result = await this.promptInteractiveDefaults(addresses, basePreset, basePresetRaw)
       preset = result === 'skip' ? undefined : result
     }
 
-    if (preset) {
-      const applyResult = await applyCommunityDefaultsToBoard(args.address, flags['rpc-url'], preset)
-      if (applyResult.applied) {
-        this.log(
-          `Applied board settings defaults (${applyResult.changedFields.join(', ')}) to "${args.address}"`,
-        )
+    for (const address of addresses) {
+      if (preset) {
+        const applyResult = await applyCommunityDefaultsToBoard(address, flags['rpc-url'], preset)
+        if (applyResult.applied) {
+          this.log(
+            `Applied board settings defaults (${applyResult.changedFields.join(', ')}) to "${address}"`,
+          )
+        } else {
+          this.log(`Board settings defaults already present on "${address}"`)
+        }
       } else {
-        this.log(`Board settings defaults already present on "${args.address}"`)
+        this.log(`Skipped applying preset defaults to "${address}"`)
       }
-    } else {
-      this.log(`Skipped applying preset defaults to "${args.address}"`)
+
+      const board: BoardConfig = { address }
+      if (preset) {
+        const boardManagerDefaults = preset.boardManagerSettings
+        if (boardManagerDefaults.perPage !== undefined) board.perPage = boardManagerDefaults.perPage
+        if (boardManagerDefaults.pages !== undefined) board.pages = boardManagerDefaults.pages
+        if (boardManagerDefaults.bumpLimit !== undefined) board.bumpLimit = boardManagerDefaults.bumpLimit
+        if (boardManagerDefaults.archivePurgeSeconds !== undefined) {
+          board.archivePurgeSeconds = boardManagerDefaults.archivePurgeSeconds
+        }
+        if (boardManagerDefaults.moderationReasons !== undefined) {
+          board.moderationReasons = boardManagerDefaults.moderationReasons
+        }
+      }
+      if (flags['per-page'] !== undefined) board.perPage = flags['per-page']
+      if (flags.pages !== undefined) board.pages = flags.pages
+      if (flags['bump-limit'] !== undefined) board.bumpLimit = flags['bump-limit']
+      if (flags['archive-purge-seconds'] !== undefined) board.archivePurgeSeconds = flags['archive-purge-seconds']
+
+      saveBoardConfig(configDir, board)
+
+      this.log(`Added board "${address}" to ${configDir}`)
     }
-
-    const board: BoardConfig = { address: args.address }
-    if (preset) {
-      const boardManagerDefaults = preset.boardManagerSettings
-      if (boardManagerDefaults.perPage !== undefined) board.perPage = boardManagerDefaults.perPage
-      if (boardManagerDefaults.pages !== undefined) board.pages = boardManagerDefaults.pages
-      if (boardManagerDefaults.bumpLimit !== undefined) board.bumpLimit = boardManagerDefaults.bumpLimit
-      if (boardManagerDefaults.archivePurgeSeconds !== undefined) {
-        board.archivePurgeSeconds = boardManagerDefaults.archivePurgeSeconds
-      }
-      if (boardManagerDefaults.moderationReasons !== undefined) {
-        board.moderationReasons = boardManagerDefaults.moderationReasons
-      }
-    }
-    if (flags['per-page'] !== undefined) board.perPage = flags['per-page']
-    if (flags.pages !== undefined) board.pages = flags.pages
-    if (flags['bump-limit'] !== undefined) board.bumpLimit = flags['bump-limit']
-    if (flags['archive-purge-seconds'] !== undefined) board.archivePurgeSeconds = flags['archive-purge-seconds']
-
-    saveBoardConfig(configDir, board)
-
-    this.log(`Added board "${args.address}" to ${configDir}`)
   }
 }
