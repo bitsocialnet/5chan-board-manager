@@ -326,7 +326,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event.workflow_run.head_sha }}
+          # Use master HEAD instead of workflow_run.head_sha: by the time this
+          # job runs, the upstream "CI build" workflow has already executed
+          # release-it, which pushed a `chore(release): X.Y.Z [skip ci]` commit
+          # bumping package.json. Checking out head_sha would build the
+          # pre-release version and tag it as :latest, leaving the new release
+          # without a Docker image (since [skip ci] prevents a re-trigger).
+          ref: master
 
       - name: Get latest release tag
         id: previoustag
