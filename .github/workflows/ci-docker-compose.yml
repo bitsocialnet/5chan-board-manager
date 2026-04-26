@@ -308,6 +308,7 @@ jobs:
           docker compose down -v
           docker rm -f 5chan-bitsocial-cli || true
 
+  # Publishes the multi-arch Docker image to ghcr.io once gating jobs pass.
   publish:
     name: Publish Docker image
     needs: [full-stack, standalone, warm-cache]
