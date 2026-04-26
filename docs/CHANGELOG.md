@@ -1,5 +1,7 @@
 # Changelog
 
+## [0.2.12](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.11...v0.2.12) (2026-04-26)
+
 ## [0.2.11](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.10...v0.2.11) (2026-04-25)
 
 ### Features
