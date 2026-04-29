@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.13](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.12...v0.2.13) (2026-04-29)
+
+### Bug Fixes
+
+* **daemon:** surface log output and add heartbeat with crash-on-stale ([00a291e](https://github.com/bitsocialnet/5chan-board-manager/commit/00a291e7ed516d7749154f390d2d28651136cab8))
+
 ## [0.2.12](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.11...v0.2.12) (2026-04-26)
 
 ## [0.2.11](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.10...v0.2.11) (2026-04-25)
