@@ -16,6 +16,15 @@ export interface BoardManagers {
 }
 
 /**
+ * Runtime-only options forwarded to every board manager.
+ * Distinct from board config — these come from CLI flags / runtime context, not from config files.
+ */
+export interface BoardManagersRuntimeOptions {
+  /** Shared heartbeat file path. Each board's heartbeat tick touches it. */
+  heartbeatPath?: string
+}
+
+/**
  * Start board managers that watch the config directory for changes.
  * Watches both boards/ directory and global.json for hot-reload.
  * On config change, diffs the old and new config, stops removed board managers,
@@ -24,6 +33,7 @@ export interface BoardManagers {
 export async function startBoardManagers(
   configDir: string,
   initialConfig: MultiBoardConfig,
+  runtimeOptions: BoardManagersRuntimeOptions = {},
 ): Promise<BoardManagers> {
   const boardManagers = new Map<string, BoardManagerResult>()
   const errors = new Map<string, Error>()
@@ -68,7 +78,7 @@ export async function startBoardManagers(
     const options = resolveBoardManagerOptions(board, initialConfig, configDir)
     try {
       log(`starting board manager for ${board.address}`)
-      const result = await startBoardManager({ ...options, onAddressChange })
+      const result = await startBoardManager({ ...options, ...runtimeOptions, onAddressChange })
       boardManagers.set(board.address, result)
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err))
@@ -136,7 +146,7 @@ export async function startBoardManagers(
         const options = resolveBoardManagerOptions(board, newConfig, configDir)
         try {
           log(`starting board manager for changed board ${board.address}`)
-          const result = await startBoardManager({ ...options, onAddressChange })
+          const result = await startBoardManager({ ...options, ...runtimeOptions, onAddressChange })
           boardManagers.set(board.address, result)
         } catch (err) {
           const error = err instanceof Error ? err : new Error(String(err))
@@ -150,7 +160,7 @@ export async function startBoardManagers(
         const options = resolveBoardManagerOptions(board, newConfig, configDir)
         try {
           log(`starting board manager for added board ${board.address}`)
-          const result = await startBoardManager({ ...options, onAddressChange })
+          const result = await startBoardManager({ ...options, ...runtimeOptions, onAddressChange })
           boardManagers.set(board.address, result)
           errors.delete(board.address)
         } catch (err) {

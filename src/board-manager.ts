@@ -1,5 +1,6 @@
 import { connectToPkcRpc } from './pkc-rpc.js'
 import Logger from '@pkcprotocol/pkc-logger'
+import { closeSync, openSync, utimesSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { loadState, saveState, acquireLock } from './state.js'
 import type { BoardManagerOptions, BoardManagerResult, BoardManagerState, Comment, FileLock, ModerationReasons, Community, Signer, ThreadComment, Page } from './types.js'
@@ -358,8 +359,10 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
 
   let updateRunning = false
   let updatePendingRerun = false
+  let lastUpdateAt = Date.now()
 
   const updateHandler = () => {
+    lastUpdateAt = Date.now()
     if (updateRunning) {
       updatePendingRerun = true
       return
@@ -395,9 +398,53 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
   await community.update()
   log(`board manager running for ${communityAddress}`)
 
+  const heartbeatPath = options.heartbeatPath
+  const heartbeatIntervalMs = options.heartbeatIntervalMs
+    ?? parseInt(process.env['HEARTBEAT_INTERVAL_SECONDS'] ?? '300', 10) * 1000
+  const heartbeatStaleUpdateMs = options.heartbeatStaleUpdateMs
+    ?? parseInt(process.env['HEARTBEAT_STALE_UPDATE_SECONDS'] ?? '1800', 10) * 1000
+  const heartbeatFailureThreshold = options.heartbeatFailureThreshold
+    ?? parseInt(process.env['HEARTBEAT_FAILURE_THRESHOLD'] ?? '3', 10)
+  const onHeartbeatExit = options.onHeartbeatExit ?? ((): void => { process.exit(1) })
+
+  let consecutiveStaleTicks = 0
+  let heartbeatInterval: NodeJS.Timeout | undefined
+
+  if (heartbeatPath) {
+    heartbeatInterval = setInterval(() => {
+      if (stopped) return
+      const now = Date.now()
+      const sinceLastUpdate = now - lastUpdateAt
+      const lastUpdateIso = new Date(lastUpdateAt).toISOString()
+      console.log(`[board ${communityAddress}] heartbeat — last update: ${lastUpdateIso} (${Math.round(sinceLastUpdate / 1000)}s ago)`)
+
+      try {
+        utimesSync(heartbeatPath, now / 1000, now / 1000)
+      } catch {
+        try {
+          closeSync(openSync(heartbeatPath, 'w'))
+        } catch (err) {
+          console.error(`[board ${communityAddress}] failed to touch heartbeat file ${heartbeatPath}: ${err instanceof Error ? err.message : String(err)}`)
+        }
+      }
+
+      if (sinceLastUpdate > heartbeatStaleUpdateMs) {
+        consecutiveStaleTicks++
+        console.error(`[board ${communityAddress}] no update events for ${Math.round(sinceLastUpdate / 1000)}s (stale tick ${consecutiveStaleTicks}/${heartbeatFailureThreshold})`)
+        if (consecutiveStaleTicks >= heartbeatFailureThreshold) {
+          console.error(`[board ${communityAddress}] heartbeat threshold exceeded, exiting for restart`)
+          onHeartbeatExit()
+        }
+      } else {
+        consecutiveStaleTicks = 0
+      }
+    }, heartbeatIntervalMs)
+  }
+
   return {
     async stop() {
       stopped = true
+      if (heartbeatInterval) clearInterval(heartbeatInterval)
       community.removeListener('update', updateHandler)
       saveState(statePath, state)
       fileLock.release()

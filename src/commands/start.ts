@@ -1,5 +1,6 @@
 import { Command, Flags } from '@oclif/core'
 import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { loadConfig } from '../config-manager.js'
 import { startBoardManagers } from '../board-managers.js'
 import { pipeDebugLogsToLogFile } from '../file-logger.js'
@@ -42,10 +43,6 @@ uncaught errors still reach the terminal.`
     const { flags } = await this.parse(Start)
     const configDir = flags['config-dir'] ?? this.config.configDir
 
-    if (!process.env['DEBUG']) {
-      process.env['DEBUG'] = '5chan:*'
-    }
-
     const skipFileLogging = process.env['VITEST'] === 'true'
     let logFilePath: string | undefined
     let logFile: Awaited<ReturnType<typeof pipeDebugLogsToLogFile>>['logFile'] | undefined
@@ -57,7 +54,7 @@ uncaught errors still reach the terminal.`
       logFile = piped.logFile
       stdoutWrite = piped.stdoutWrite
       stdoutWrite(`To view logs, run: 5chan logs\n`)
-      stdoutWrite(`For custom debug logging, restart with DEBUG env, e.g.: DEBUG='5chan:*,pkc*,pkc-js*' 5chan start\n`)
+      stdoutWrite(`For custom debug logging, restart with DEBUG env, e.g.: DEBUG='bitsocial:5chan-board-manager*,pkc*,pkc-js*' 5chan start\n`)
       stdoutWrite(`Daemon log file: ${logFilePath}\n`)
     }
 
@@ -73,7 +70,8 @@ uncaught errors still reach the terminal.`
       this.log(`Config: ${configDir}`)
       this.log(`Watching config directory for changes`)
 
-      const manager = await startBoardManagers(configDir, config)
+      const heartbeatPath = process.env['HEARTBEAT_FILE'] ?? join(flags['log-path'], 'heartbeat')
+      const manager = await startBoardManagers(configDir, config, { heartbeatPath })
 
       const started = manager.boardManagers.size
       const failed = manager.errors.size

@@ -647,16 +647,12 @@ docker compose exec 5chan 5chan logs -f     # stream live
 docker compose exec 5chan 5chan logs --stderr -f   # only pkc-logger output
 ```
 
-**Docker:** Debug logging (`DEBUG=5chan:*`) is enabled by default in the Docker image.
-Because stderr is no longer teed to the terminal, `docker logs` will be quieter than
-before — use `5chan logs` to see the full debug stream. To silence the log file as
-well, override the variable to empty:
-
-```bash
-docker run -e DEBUG= 5chan-board-manager
-```
-
-Or in `docker-compose.yml`:
+**Docker:** debug logging is **off** by default. The example compose files set
+`DEBUG=bitsocial:5chan-board-manager*` on the `5chan` service so daemon output
+flows into the log file. Because stderr is no longer teed to the terminal,
+`docker logs` will be quieter than before — use `5chan logs` to see the full
+debug stream. To silence the log file, drop the variable from your compose
+file (or override it to empty):
 
 ```yaml
 environment:
@@ -667,8 +663,25 @@ To broaden the captured namespaces (e.g. to include pkc-js events), widen `DEBUG
 
 ```yaml
 environment:
-  DEBUG: "5chan:*,pkc*,pkc-js*"
+  DEBUG: "bitsocial:5chan-board-manager*,pkc*,pkc-js*"
 ```
+
+## Heartbeat & Health Check
+
+Each board manager runs a periodic heartbeat that:
+
+- Logs a line per tick (`[board <addr>] heartbeat — last update: <ISO> (<n>s ago)`) so you can confirm the daemon is alive even when a board is idle.
+- Touches a shared heartbeat file (default `$XDG_STATE_HOME/5chan/heartbeat`, i.e. `/data/5chan/heartbeat` in Docker) for the Docker healthcheck to consume.
+- If `now - lastUpdateAt` exceeds `HEARTBEAT_STALE_UPDATE_SECONDS` for `HEARTBEAT_FAILURE_THRESHOLD` consecutive ticks, the process exits with code 1 so Docker's `restart: unless-stopped` brings it back.
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `HEARTBEAT_INTERVAL_SECONDS` | `300` | Tick cadence. |
+| `HEARTBEAT_STALE_UPDATE_SECONDS` | `1800` | A tick is considered "stale" if no `community.update` event has fired within this window. |
+| `HEARTBEAT_FAILURE_THRESHOLD` | `3` | Consecutive stale ticks before the process exits. |
+| `HEARTBEAT_FILE` | `<log-path>/heartbeat` | Override the heartbeat file path (e.g. for tests). |
+
+The example compose files include a healthcheck that reports `unhealthy` if the heartbeat file's mtime is older than 10 minutes — useful for `docker ps` and external watchdogs. Self-healing comes from the in-process `process.exit(1)`; vanilla compose does not restart on `unhealthy` without an autoheal sidecar.
 
 ## 4chan Board Behavior Reference
 
