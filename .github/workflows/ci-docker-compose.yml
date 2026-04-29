@@ -108,11 +108,17 @@ jobs:
         run: |
           cp docker-compose.example.yml docker-compose.yml
 
+          # The example compose file's 5chan healthcheck stat's a heartbeat
+          # file written by the daemon. CI replaces the daemon with `sleep
+          # infinity` to drive the CLI via `docker compose exec`, so the
+          # heartbeat never appears and the healthcheck would block `--wait`.
           cat > docker-compose.override.yml <<'EOF'
           services:
             5chan:
               image: 5chan-board-manager:ci-test
               command: ["sleep", "infinity"]
+              healthcheck:
+                disable: true
           EOF
 
       - name: Start services
@@ -251,6 +257,7 @@ jobs:
         run: |
           cp docker-compose.standalone.example.yml docker-compose.yml
 
+          # See full-stack job for context on disabling the healthcheck.
           cat > docker-compose.override.yml <<'EOF'
           services:
             5chan:
@@ -258,6 +265,8 @@ jobs:
               command: ["sleep", "infinity"]
               environment:
                 - PKC_RPC_WS_URL=ws://host.docker.internal:9138/ci-test-auth-key
+              healthcheck:
+                disable: true
           EOF
 
       - name: Start 5chan
