@@ -65,14 +65,6 @@ function resolvePkcLoggerDebug(): DebugModule | null {
   }
 }
 
-function resolveLocalDebug(): DebugModule | null {
-  try {
-    return createRequire(import.meta.url)('debug') as DebugModule
-  } catch {
-    return null
-  }
-}
-
 export async function pipeDebugLogsToLogFile(logPath: string): Promise<PipeResult> {
   const { logFilePath } = await getNewLogfileByEvacuatingOldLogsIfNeeded(logPath)
   const logFile = fs.createWriteStream(logFilePath, { flags: 'a' })
@@ -93,14 +85,12 @@ export async function pipeDebugLogsToLogFile(logPath: string): Promise<PipeResul
   const asString = (data: unknown): string =>
     typeof data === 'string' ? data : Buffer.from(data as Uint8Array).toString()
 
-  // Hijack debug modules so pkc-logger output is written directly to the log file
-  // with a single [ISO] [stderr] timestamp, instead of going through stderr.write
-  // (which would double-timestamp or pick up debug's own date prefix).
+  // Hijack pkc-logger's underlying debug module so its output is written directly
+  // to the log file with a single [ISO] [stderr] timestamp, instead of going through
+  // stderr.write (which would double-timestamp or pick up debug's own date prefix).
   const debugModules: DebugModule[] = []
   const pkcLoggerDebug = resolvePkcLoggerDebug()
   if (pkcLoggerDebug) debugModules.push(pkcLoggerDebug)
-  const localDebug = resolveLocalDebug()
-  if (localDebug && localDebug !== pkcLoggerDebug) debugModules.push(localDebug)
 
   const originalDebugLogs = debugModules.map(m => m.log)
   for (const mod of debugModules) {
