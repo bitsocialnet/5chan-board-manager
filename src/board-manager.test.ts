@@ -2,9 +2,21 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync, existsSync, writeFileSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { createRequire } from 'node:module'
+import Logger from '@pkcprotocol/pkc-logger'
 import { loadState, saveState } from './state.js'
 import type { BoardManagerState, PKCInstance, Page, ThreadComment } from './types.js'
 import { startBoardManager } from './board-manager.js'
+
+interface DebugModule {
+  log: (...args: unknown[]) => void
+}
+
+function getPkcLoggerDebugModule(): DebugModule {
+  const pkcLoggerPkg = createRequire(import.meta.url).resolve('@pkcprotocol/pkc-logger/package.json')
+  const pkcLoggerRequire = createRequire(pkcLoggerPkg)
+  return pkcLoggerRequire('debug') as DebugModule
+}
 
 vi.mock('./pkc-rpc.js', () => ({
   connectToPkcRpc: vi.fn(),
@@ -1462,13 +1474,40 @@ describe('board manager logic', () => {
   })
 
   describe('heartbeat', () => {
+    const debugModule = getPkcLoggerDebugModule()
+    let originalDebugLog: typeof debugModule.log
+    let debugLogSpy: ReturnType<typeof vi.fn<(...args: unknown[]) => void>>
+
+    beforeEach(() => {
+      Logger.enable('bitsocial:5chan-board-manager*')
+      originalDebugLog = debugModule.log
+      debugLogSpy = vi.fn<(...args: unknown[]) => void>()
+      debugModule.log = debugLogSpy
+    })
+
+    afterEach(() => {
+      debugModule.log = originalDebugLog
+      Logger.disable()
+    })
+
+    function heartbeatLogs(): unknown[][] {
+      return debugLogSpy.mock.calls.filter(
+        (c) => typeof c[0] === 'string' && c[0].includes('heartbeat'),
+      )
+    }
+
+    function staleLogs(): unknown[][] {
+      return debugLogSpy.mock.calls.filter(
+        (c) => typeof c[0] === 'string' && c[0].includes('no update events for'),
+      )
+    }
+
     it('touches the heartbeat file and logs a heartbeat line on each tick', async () => {
       const { instance } = createMockPKC()
       const mockSub = createMockCommunity({ pageCids: {}, pages: {}, getPage: vi.fn() })
       vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       const heartbeatPath = join(dir, 'heartbeat')
-      const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
 
       const boardManager = await startBoardManager({
         communityAddress: 'board.bso',
@@ -1477,7 +1516,6 @@ describe('board manager logic', () => {
         heartbeatPath,
         heartbeatIntervalMs: 30,
         heartbeatStaleUpdateMs: 60_000,
-        heartbeatFailureThreshold: 100,
       })
 
       await vi.waitFor(() => {
@@ -1485,22 +1523,16 @@ describe('board manager logic', () => {
       })
 
       await vi.waitFor(() => {
-        const heartbeatLogs = consoleLogSpy.mock.calls.filter(
-          (c) => typeof c[0] === 'string' && c[0].includes('heartbeat'),
-        )
-        expect(heartbeatLogs.length).toBeGreaterThanOrEqual(1)
+        expect(heartbeatLogs().length).toBeGreaterThanOrEqual(1)
       })
 
       await boardManager.stop()
-      consoleLogSpy.mockRestore()
     })
 
     it('does not start a heartbeat interval when heartbeatPath is undefined', async () => {
       const { instance } = createMockPKC()
       const mockSub = createMockCommunity({ pageCids: {}, pages: {}, getPage: vi.fn() })
       vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
-
-      const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
 
       const boardManager = await startBoardManager({
         communityAddress: 'board.bso',
@@ -1511,24 +1543,17 @@ describe('board manager logic', () => {
 
       await new Promise((r) => setTimeout(r, 100))
 
-      const heartbeatLogs = consoleLogSpy.mock.calls.filter(
-        (c) => typeof c[0] === 'string' && c[0].includes('heartbeat'),
-      )
-      expect(heartbeatLogs).toHaveLength(0)
+      expect(heartbeatLogs()).toHaveLength(0)
 
       await boardManager.stop()
-      consoleLogSpy.mockRestore()
     })
 
-    it('calls onHeartbeatExit after N consecutive stale ticks', async () => {
+    it('logs a stale-update warning each tick when no update events arrive', async () => {
       const { instance } = createMockPKC()
       const mockSub = createMockCommunity({ pageCids: {}, pages: {}, getPage: vi.fn() })
       vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       const heartbeatPath = join(dir, 'heartbeat')
-      const onHeartbeatExit = vi.fn()
-      vi.spyOn(console, 'log').mockImplementation(() => {})
-      vi.spyOn(console, 'error').mockImplementation(() => {})
 
       const boardManager = await startBoardManager({
         communityAddress: 'board.bso',
@@ -1537,32 +1562,26 @@ describe('board manager logic', () => {
         heartbeatPath,
         heartbeatIntervalMs: 20,
         heartbeatStaleUpdateMs: 1,
-        heartbeatFailureThreshold: 3,
-        onHeartbeatExit,
       })
 
       try {
         await vi.waitFor(
           () => {
-            expect(onHeartbeatExit).toHaveBeenCalled()
+            expect(staleLogs().length).toBeGreaterThanOrEqual(2)
           },
           { timeout: 1000 },
         )
       } finally {
         await boardManager.stop()
-        vi.restoreAllMocks()
       }
     })
 
-    it('resets the stale counter when an update event arrives', async () => {
+    it('does not log a stale-update warning while updates keep arriving', async () => {
       const { instance } = createMockPKC()
       const mockSub = createMockCommunity({ pageCids: {}, pages: {}, getPage: vi.fn() })
       vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       const heartbeatPath = join(dir, 'heartbeat')
-      const onHeartbeatExit = vi.fn()
-      vi.spyOn(console, 'log').mockImplementation(() => {})
-      vi.spyOn(console, 'error').mockImplementation(() => {})
 
       const boardManager = await startBoardManager({
         communityAddress: 'board.bso',
@@ -1571,23 +1590,20 @@ describe('board manager logic', () => {
         heartbeatPath,
         heartbeatIntervalMs: 20,
         heartbeatStaleUpdateMs: 50,
-        heartbeatFailureThreshold: 3,
-        onHeartbeatExit,
       })
 
       // Refresher fires updates every 10ms — well within the 50ms staleness window,
-      // so each heartbeat tick should see a fresh lastUpdateAt and reset the counter.
+      // so each heartbeat tick should see a fresh lastUpdateAt and not warn.
       const refresher = setInterval(() => {
         mockSub._triggerUpdate()
       }, 10)
 
       try {
         await new Promise((r) => setTimeout(r, 200))
-        expect(onHeartbeatExit).not.toHaveBeenCalled()
+        expect(staleLogs()).toHaveLength(0)
       } finally {
         clearInterval(refresher)
         await boardManager.stop()
-        vi.restoreAllMocks()
       }
     })
 
@@ -1597,7 +1613,6 @@ describe('board manager logic', () => {
       vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       const heartbeatPath = join(dir, 'heartbeat')
-      const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
 
       const boardManager = await startBoardManager({
         communityAddress: 'board.bso',
@@ -1606,24 +1621,19 @@ describe('board manager logic', () => {
         heartbeatPath,
         heartbeatIntervalMs: 20,
         heartbeatStaleUpdateMs: 60_000,
-        heartbeatFailureThreshold: 100,
       })
 
       await vi.waitFor(() => {
-        const heartbeatLogs = consoleLogSpy.mock.calls.filter(
-          (c) => typeof c[0] === 'string' && c[0].includes('heartbeat'),
-        )
-        expect(heartbeatLogs.length).toBeGreaterThanOrEqual(1)
+        expect(heartbeatLogs().length).toBeGreaterThanOrEqual(1)
       })
 
       await boardManager.stop()
 
-      const callsBeforeWait = consoleLogSpy.mock.calls.length
+      const ticksBeforeWait = heartbeatLogs().length
       await new Promise((r) => setTimeout(r, 80))
-      const callsAfterWait = consoleLogSpy.mock.calls.length
+      const ticksAfterWait = heartbeatLogs().length
 
-      expect(callsAfterWait).toBe(callsBeforeWait)
-      consoleLogSpy.mockRestore()
+      expect(ticksAfterWait).toBe(ticksBeforeWait)
     })
   })
 })

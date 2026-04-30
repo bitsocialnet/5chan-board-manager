@@ -40,12 +40,8 @@ export interface BoardManagerOptions {
   heartbeatPath?: string
   /** Heartbeat tick interval in ms. Defaults from `HEARTBEAT_INTERVAL_SECONDS` env or 300_000. */
   heartbeatIntervalMs?: number
-  /** If `now - lastUpdateAt` exceeds this, a tick counts as stale. Defaults from `HEARTBEAT_STALE_UPDATE_SECONDS` env or 1_800_000. */
+  /** If `now - lastUpdateAt` exceeds this, a stale-update warning is logged each tick. Defaults from `HEARTBEAT_STALE_UPDATE_SECONDS` env or 1_800_000. */
   heartbeatStaleUpdateMs?: number
-  /** Consecutive stale ticks before exit. Defaults from `HEARTBEAT_FAILURE_THRESHOLD` env or 3. */
-  heartbeatFailureThreshold?: number
-  /** Called when failure threshold is exceeded. Defaults to `() => process.exit(1)`. Override in tests. */
-  onHeartbeatExit?: () => void
 }
 
 export interface BoardManagerResult {

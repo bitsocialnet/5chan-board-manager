@@ -403,11 +403,7 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
     ?? parseInt(process.env['HEARTBEAT_INTERVAL_SECONDS'] ?? '300', 10) * 1000
   const heartbeatStaleUpdateMs = options.heartbeatStaleUpdateMs
     ?? parseInt(process.env['HEARTBEAT_STALE_UPDATE_SECONDS'] ?? '1800', 10) * 1000
-  const heartbeatFailureThreshold = options.heartbeatFailureThreshold
-    ?? parseInt(process.env['HEARTBEAT_FAILURE_THRESHOLD'] ?? '3', 10)
-  const onHeartbeatExit = options.onHeartbeatExit ?? ((): void => { process.exit(1) })
 
-  let consecutiveStaleTicks = 0
   let heartbeatInterval: NodeJS.Timeout | undefined
 
   if (heartbeatPath) {
@@ -416,7 +412,7 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
       const now = Date.now()
       const sinceLastUpdate = now - lastUpdateAt
       const lastUpdateIso = new Date(lastUpdateAt).toISOString()
-      console.log(`[board ${communityAddress}] heartbeat — last update: ${lastUpdateIso} (${Math.round(sinceLastUpdate / 1000)}s ago)`)
+      log.trace(`[board ${communityAddress}] heartbeat — last update: ${lastUpdateIso} (${Math.round(sinceLastUpdate / 1000)}s ago)`)
 
       try {
         utimesSync(heartbeatPath, now / 1000, now / 1000)
@@ -424,19 +420,12 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
         try {
           closeSync(openSync(heartbeatPath, 'w'))
         } catch (err) {
-          console.error(`[board ${communityAddress}] failed to touch heartbeat file ${heartbeatPath}: ${err instanceof Error ? err.message : String(err)}`)
+          log.error(`[board ${communityAddress}] failed to touch heartbeat file ${heartbeatPath}: ${err instanceof Error ? err.message : String(err)}`)
         }
       }
 
       if (sinceLastUpdate > heartbeatStaleUpdateMs) {
-        consecutiveStaleTicks++
-        console.error(`[board ${communityAddress}] no update events for ${Math.round(sinceLastUpdate / 1000)}s (stale tick ${consecutiveStaleTicks}/${heartbeatFailureThreshold})`)
-        if (consecutiveStaleTicks >= heartbeatFailureThreshold) {
-          console.error(`[board ${communityAddress}] heartbeat threshold exceeded, exiting for restart`)
-          onHeartbeatExit()
-        }
-      } else {
-        consecutiveStaleTicks = 0
+        log.error(`[board ${communityAddress}] no update events for ${Math.round(sinceLastUpdate / 1000)}s`)
       }
     }, heartbeatIntervalMs)
   }

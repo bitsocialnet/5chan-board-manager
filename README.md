@@ -670,18 +670,17 @@ environment:
 
 Each board manager runs a periodic heartbeat that:
 
-- Logs a line per tick (`[board <addr>] heartbeat — last update: <ISO> (<n>s ago)`) so you can confirm the daemon is alive even when a board is idle.
+- Logs a line per tick at trace level (`[board <addr>] heartbeat — last update: <ISO> (<n>s ago)`) so you can confirm the daemon is alive even when a board is idle. Visible with the default `DEBUG='bitsocial:5chan-board-manager*'`.
 - Touches a shared heartbeat file (default `$XDG_STATE_HOME/5chan/heartbeat`, i.e. `/data/5chan/heartbeat` in Docker) for the Docker healthcheck to consume.
-- If `now - lastUpdateAt` exceeds `HEARTBEAT_STALE_UPDATE_SECONDS` for `HEARTBEAT_FAILURE_THRESHOLD` consecutive ticks, the process exits with code 1 so Docker's `restart: unless-stopped` brings it back.
+- If `now - lastUpdateAt` exceeds `HEARTBEAT_STALE_UPDATE_SECONDS`, an error-level `[board <addr>] no update events for <n>s` line is logged each tick. The process is **not** restarted automatically — operators should monitor the log or rely on the file-mtime healthcheck below.
 
 | Env var | Default | Purpose |
 |---|---|---|
 | `HEARTBEAT_INTERVAL_SECONDS` | `300` | Tick cadence. |
-| `HEARTBEAT_STALE_UPDATE_SECONDS` | `1800` | A tick is considered "stale" if no `community.update` event has fired within this window. |
-| `HEARTBEAT_FAILURE_THRESHOLD` | `3` | Consecutive stale ticks before the process exits. |
+| `HEARTBEAT_STALE_UPDATE_SECONDS` | `1800` | If no `community.update` event has fired within this window, a stale-update warning is logged each tick. |
 | `HEARTBEAT_FILE` | `<log-path>/heartbeat` | Override the heartbeat file path (e.g. for tests). |
 
-The example compose files include a healthcheck that reports `unhealthy` if the heartbeat file's mtime is older than 10 minutes — useful for `docker ps` and external watchdogs. Self-healing comes from the in-process `process.exit(1)`; vanilla compose does not restart on `unhealthy` without an autoheal sidecar.
+The example compose files include a healthcheck that reports `unhealthy` if the heartbeat file's mtime is older than 10 minutes — useful for `docker ps` and external watchdogs. Note this only catches "process completely dead" (the file's mtime stops advancing only when the interval timer stops firing); if the RPC connection is stuck but the process is alive, the heartbeat file keeps getting touched, so watch the log for the stale-update warning instead.
 
 ## 4chan Board Behavior Reference
 
