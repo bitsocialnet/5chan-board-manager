@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, existsSync, writeFileSync, utimesSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir, hostname } from 'node:os'
-import { loadState, saveState, isPidAlive, acquireLock } from './state.js'
+import { loadState, saveState, acquireLock } from './state.js'
 import type { BoardManagerState } from './types.js'
 
 describe('state', () => {
@@ -132,84 +132,76 @@ describe('state', () => {
     })
   })
 
-  describe('isPidAlive', () => {
-    it('returns true for current process', () => {
-      expect(isPidAlive(process.pid)).toBe(true)
-    })
-
-    it('returns false for dead PID', () => {
-      expect(isPidAlive(999999)).toBe(false)
-    })
-  })
-
   describe('acquireLock', () => {
-    it('creates .lock file with current PID and hostname', () => {
-      const lock = acquireLock(statePath)
+    it('creates a lockfile at <state>.lock', async () => {
+      const lock = await acquireLock(statePath)
       expect(existsSync(statePath + '.lock')).toBe(true)
-      const content = readFileSync(statePath + '.lock', 'utf-8').trim()
-      const [pidStr, host] = content.split('\n')
-      expect(Number(pidStr)).toBe(process.pid)
-      expect(host).toBe(hostname())
-      lock.release()
+      await lock.release()
     })
 
-    it('throws when live process holds lock', () => {
-      const lock = acquireLock(statePath)
-      expect(() => acquireLock(statePath)).toThrow(
-        `Another board manager (PID ${process.pid}) is already running`
-      )
-      lock.release()
+    it('throws when another holder in the same process is active', async () => {
+      const lock = await acquireLock(statePath)
+      await expect(acquireLock(statePath)).rejects.toThrow(/lock/i)
+      await lock.release()
     })
 
-    it('recovers stale lock from dead PID', () => {
-      writeFileSync(statePath + '.lock', `999999\n${hostname()}`)
-      const lock = acquireLock(statePath)
-      const content = readFileSync(statePath + '.lock', 'utf-8').trim()
-      const [pidStr] = content.split('\n')
-      expect(Number(pidStr)).toBe(process.pid)
-      lock.release()
-    })
-
-    it('recovers stale lock from different hostname even if PID is alive', () => {
-      // Use current PID (alive) but a different hostname to simulate Docker restart
-      writeFileSync(statePath + '.lock', `${process.pid}\nold-container-id`)
-      const lock = acquireLock(statePath)
-      const content = readFileSync(statePath + '.lock', 'utf-8').trim()
-      const [pidStr, host] = content.split('\n')
-      expect(Number(pidStr)).toBe(process.pid)
-      expect(host).toBe(hostname())
-      lock.release()
-    })
-
-    it('recovers old-format lock file (PID only, no hostname) with dead PID', () => {
+    it('migrates a legacy old-format lock file (PID only, no hostname)', async () => {
+      // Pre-rewrite daemons (and a brief intermediate version) wrote the lock as
+      // a regular file containing just the PID. proper-lockfile's mkdir-based
+      // strategy would fail with EEXIST against such a file, so acquireLock
+      // detects the legacy format and removes it before locking.
       writeFileSync(statePath + '.lock', '999999')
-      const lock = acquireLock(statePath)
-      const content = readFileSync(statePath + '.lock', 'utf-8').trim()
-      const [pidStr] = content.split('\n')
-      expect(Number(pidStr)).toBe(process.pid)
-      lock.release()
+      const lock = await acquireLock(statePath)
+      expect(existsSync(statePath + '.lock')).toBe(true)
+      await lock.release()
     })
 
-    it('release() removes .lock file', () => {
-      const lock = acquireLock(statePath)
+    it('migrates a legacy pid+hostname-format lock file (regression for docker-restart bug)', async () => {
+      // Reproduces the prod restart loop: container hostname is preserved across
+      // restarts, and the node entrypoint deterministically lands at the same
+      // PID, so the previous lock contents (`<own-pid>\n<own-hostname>`) used to
+      // self-collide and wedge the daemon. The legacy migration path must drop
+      // the file regardless of what's inside it.
+      writeFileSync(statePath + '.lock', `${process.pid}\n${hostname()}`)
+      const lock = await acquireLock(statePath)
       expect(existsSync(statePath + '.lock')).toBe(true)
-      lock.release()
+      await lock.release()
+    })
+
+    it('treats a lock with stale mtime as released', async () => {
+      // Simulate a daemon that acquired the lock and then crashed without
+      // releasing. proper-lockfile considers any lock whose mtime is older than
+      // the configured `stale` window (30s) to be abandoned.
+      const lockPath = statePath + '.lock'
+      mkdirSync(lockPath)
+      const past = Date.now() / 1000 - 120 // 2 minutes ago
+      utimesSync(lockPath, past, past)
+
+      const lock = await acquireLock(statePath)
+      expect(existsSync(lockPath)).toBe(true)
+      await lock.release()
+    })
+
+    it('release() removes the lockfile', async () => {
+      const lock = await acquireLock(statePath)
+      expect(existsSync(statePath + '.lock')).toBe(true)
+      await lock.release()
       expect(existsSync(statePath + '.lock')).toBe(false)
     })
 
-    it('can re-acquire after release', () => {
-      const lock1 = acquireLock(statePath)
-      lock1.release()
-      const lock2 = acquireLock(statePath)
+    it('can re-acquire after release', async () => {
+      const lock1 = await acquireLock(statePath)
+      await lock1.release()
+      const lock2 = await acquireLock(statePath)
       expect(existsSync(statePath + '.lock')).toBe(true)
-      lock2.release()
+      await lock2.release()
     })
 
-    it('auto-creates parent directories', () => {
+    it('auto-creates parent directories', async () => {
       const nestedPath = join(dir, 'a', 'b', 'c', 'state.json')
-      const lock = acquireLock(nestedPath)
+      const lock = await acquireLock(nestedPath)
       expect(existsSync(nestedPath + '.lock')).toBe(true)
-      lock.release()
+      await lock.release()
     })
   })
 

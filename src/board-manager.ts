@@ -44,7 +44,7 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
 
   let fileLock: FileLock
   try {
-    fileLock = acquireLock(statePath)
+    fileLock = await acquireLock(statePath)
   } catch (err) {
     throw new Error(`${(err as Error).message} for ${communityAddress}`)
   }
@@ -87,7 +87,7 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
     return signer
   }
 
-  function migrateAddress(newAddress: string): void {
+  async function migrateAddress(newAddress: string): Promise<void> {
     const oldAddress = communityAddress
     const oldStatePath = statePath
 
@@ -100,7 +100,7 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
     }
 
     // Release old lock
-    fileLock.release()
+    await fileLock.release()
 
     // Save state with migrated signers to current path (directory still has old name)
     saveState(statePath, state)
@@ -114,7 +114,7 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
 
     // Acquire lock on new path
     try {
-      fileLock = acquireLock(newStatePath)
+      fileLock = await acquireLock(newStatePath)
     } catch (err) {
       // Rollback: rename directory back, restore signer key, re-lock
       log.error(`failed to acquire lock on new state path ${newStatePath}: ${err}`)
@@ -123,7 +123,7 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
         state.signers[oldAddress] = state.signers[newAddress]
         delete state.signers[newAddress]
       }
-      fileLock = acquireLock(oldStatePath)
+      fileLock = await acquireLock(oldStatePath)
       saveState(oldStatePath, state)
       throw err
     }
@@ -374,7 +374,7 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
         // Detect address change (e.g., hash → named address via bitsocial-cli)
         if (community.address && community.address !== communityAddress) {
           try {
-            migrateAddress(community.address)
+            await migrateAddress(community.address)
           } catch (err) {
             log.error(`address migration failed: ${err}`)
           }
@@ -436,7 +436,7 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
       if (heartbeatInterval) clearInterval(heartbeatInterval)
       community.removeListener('update', updateHandler)
       saveState(statePath, state)
-      fileLock.release()
+      await fileLock.release()
       await community.stop?.()
       await pkc.destroy()
       log(`board manager stopped for ${communityAddress}`)

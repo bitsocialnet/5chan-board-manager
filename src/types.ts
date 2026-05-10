@@ -58,7 +58,7 @@ export interface ArchivedThread {
 
 export interface FileLock {
   lockPath: string
-  release: () => void
+  release: () => Promise<void>
 }
 
 export interface BoardManagerState {

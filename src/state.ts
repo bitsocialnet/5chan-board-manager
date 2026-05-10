@@ -1,6 +1,6 @@
-import { readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync, openSync, closeSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync, statSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { hostname } from 'node:os'
+import lockfile from '@pkcprotocol/proper-lock-file'
 import type { BoardManagerState, FileLock } from './types.js'
 
 const DEFAULT_STATE: BoardManagerState = {
@@ -33,42 +33,31 @@ export function saveState(path: string, state: BoardManagerState): void {
   }
 }
 
-export function isPidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
-}
-
-export function acquireLock(statePath: string): FileLock {
+export async function acquireLock(statePath: string): Promise<FileLock> {
   const lockPath = statePath + '.lock'
-  const currentHostname = hostname()
   mkdirSync(dirname(lockPath), { recursive: true })
+
+  // Migrate legacy file-format locks left over from the prior PID-based scheme.
+  // proper-lockfile uses an mkdir-based directory at the lockfile path; if a
+  // regular file is sitting there it would EEXIST. The legacy lock can't be
+  // honoured anyway — its owner check (pid+hostname) self-collided after Docker
+  // restart, which is the bug we're replacing.
   try {
-    const fd = openSync(lockPath, 'wx')
-    writeFileSync(fd, `${process.pid}\n${currentHostname}`)
-    closeSync(fd)
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
-    // Lock file exists — check if holder is still alive
-    const content = readFileSync(lockPath, 'utf-8').trim()
-    const lines = content.split('\n')
-    const pid = Number(lines[0])
-    const storedHostname = lines[1] // undefined for old-format lock files
-    const sameHost = storedHostname === undefined || storedHostname === currentHostname
-    if (sameHost && isPidAlive(pid)) {
-      throw new Error(`Another board manager (PID ${pid}) is already running`)
-    }
-    // Stale lock — different host or dead PID — remove and retry
-    unlinkSync(lockPath)
-    return acquireLock(statePath)
-  }
+    if (statSync(lockPath).isFile()) unlinkSync(lockPath)
+  } catch { /* not present — fine */ }
+
+  const release = await lockfile.lock(statePath, {
+    lockfilePath: lockPath,
+    realpath: false,             // statePath may not yet exist on first run
+    stale: 30_000,               // 30s — well above the 10s update interval
+    update: 10_000,              // refresh mtime every 10s as liveness signal
+    retries: { retries: 0 },     // fail fast — caller decides whether to retry
+  })
+
   return {
     lockPath,
-    release() {
-      try { unlinkSync(lockPath) } catch {}
+    release: async () => {
+      try { await release() } catch { /* already released or compromised — ignore */ }
     },
   }
 }

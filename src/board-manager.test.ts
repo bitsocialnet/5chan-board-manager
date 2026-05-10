@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync, existsSync, writeFileSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
-import { tmpdir } from 'node:os'
+import { tmpdir, hostname } from 'node:os'
 import { createRequire } from 'node:module'
+import lockfile from '@pkcprotocol/proper-lock-file'
 import Logger from '@pkcprotocol/pkc-logger'
 import { loadState, saveState } from './state.js'
 import type { BoardManagerState, PKCInstance, Page, ThreadComment } from './types.js'
@@ -746,9 +747,18 @@ describe('board manager logic', () => {
   })
 
   describe('process lock', () => {
-    it('throws when lock is held by a live PID', async () => {
-      const lockPath = join(boardDir, 'state.json.lock')
-      writeFileSync(lockPath, String(process.pid))
+    it('throws when another holder currently owns the lock', async () => {
+      const statePath = join(boardDir, 'state.json')
+      const lockPath = statePath + '.lock'
+      // Stand in for a concurrent live daemon — proper-lockfile rejects the
+      // second acquire because the first holder's mtime is being refreshed.
+      const release = await lockfile.lock(statePath, {
+        lockfilePath: lockPath,
+        realpath: false,
+        stale: 30_000,
+        update: 10_000,
+        retries: { retries: 0 },
+      })
 
       const { instance } = createMockPKC()
       const mockSub = createMockCommunity({ pageCids: {}, pages: {} })
@@ -758,10 +768,15 @@ describe('board manager logic', () => {
         communityAddress: 'board.bso',
         pkcRpcUrl: 'ws://localhost:9138',
         boardDir: boardDir,
-      })).rejects.toThrow(`Another board manager (PID ${process.pid}) is already running for board.bso`)
+      })).rejects.toThrow(/lock.*board\.bso/i)
+
+      await release()
     })
 
-    it('succeeds when lock has stale PID', async () => {
+    it('succeeds when only a legacy PID-format lock file is left over', async () => {
+      // Old daemons wrote the lock as a regular file. proper-lockfile uses an
+      // mkdir-based directory lock, so acquireLock detects the legacy file and
+      // removes it before locking. The leftover file's contents are irrelevant.
       const lockPath = join(boardDir, 'state.json.lock')
       writeFileSync(lockPath, '999999')
 
@@ -827,6 +842,28 @@ describe('board manager logic', () => {
       expect(existsSync(lockPath)).toBe(true)
       await boardManager2.stop()
       expect(existsSync(lockPath)).toBe(false)
+    })
+
+    // Reproduces the prod restart loop on new-plebbit (May 2026): bitsocial_cli_5chan_board
+    // container crash-looped for 3 days because each restart kept the same hostname AND the
+    // node entrypoint kept landing on the same PID, so isPidAlive(storedPid) returned true
+    // (it was checking the daemon's own freshly-started PID). The daemon should treat a lock
+    // from a prior crash as stale: we just started, so the lock can't actually be ours.
+    it('treats lock from prior crash as stale when stored PID equals own PID (docker-restart scenario)', async () => {
+      const lockPath = join(boardDir, 'state.json.lock')
+      writeFileSync(lockPath, `${process.pid}\n${hostname()}`)
+
+      const { instance } = createMockPKC()
+      const mockSub = createMockCommunity({ pageCids: {}, pages: {} })
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
+
+      const boardManager = await startBoardManager({
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
+        boardDir: boardDir,
+      })
+      expect(existsSync(lockPath)).toBe(true)
+      await boardManager.stop()
     })
   })
 
@@ -1377,8 +1414,10 @@ describe('board manager logic', () => {
 
       const onAddressChange = vi.fn().mockImplementation((oldAddr: string, newAddr: string) => {
         renameSync(join(dir, 'boards', oldAddr), join(dir, 'boards', newAddr))
-        // Create a conflicting lock file with current PID at the new location
-        writeFileSync(join(dir, 'boards', newAddr, 'state.json.lock'), String(process.pid))
+        // Stand in for a concurrent live daemon at the new location: create the
+        // proper-lockfile mkdir-style lock directly so the daemon's acquire call
+        // fails with EEXIST + fresh mtime → "lock already being held".
+        mkdirSync(join(dir, 'boards', newAddr, 'state.json.lock'))
       })
       const boardManager = await startBoardManager({
         communityAddress: '12D3KooWConflict',
