@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.16](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.15...v0.2.16) (2026-05-10)
+
+### Bug Fixes
+
+* **daemon:** replace PID-based lock with proper-lockfile ([deb47ba](https://github.com/bitsocialnet/5chan-board-manager/commit/deb47ba51aeb2f1a8696890471c0371ba2627a3d)), closes [#1](https://github.com/bitsocialnet/5chan-board-manager/issues/1)
+
 ## [0.2.15](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.14...v0.2.15) (2026-04-29)
 
 ## [0.2.14](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.13...v0.2.14) (2026-04-29)
