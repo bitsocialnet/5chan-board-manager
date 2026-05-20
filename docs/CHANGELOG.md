@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.17](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.16...v0.2.17) (2026-05-20)
+
+### Bug Fixes
+
+* **compose:** forward kubo swarm port 4001 (TCP + UDP) ([1e93ba6](https://github.com/bitsocialnet/5chan-board-manager/commit/1e93ba694c50789a3a6736f3f77c494797965be3)), closes [bitsocialnet/bitsocial-cli#44](https://github.com/bitsocialnet/bitsocial-cli/issues/44)
+
 ## [0.2.16](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.15...v0.2.16) (2026-05-10)
 
 ### Bug Fixes
