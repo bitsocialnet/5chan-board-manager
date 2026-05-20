@@ -18,6 +18,8 @@ services:
     restart: unless-stopped
     ports:
       - "9138:9138"
+      - "4001:4001"      # Kubo Swarm (TCP)
+      - "4001:4001/udp"  # Kubo Swarm (QUIC + WebTransport + WebRTC-direct)
     volumes:
       - bitsocial-data:/data
       - bitsocial-logs:/logs
