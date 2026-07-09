@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.19](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.18...v0.2.19) (2026-07-09)
+
+### Bug Fixes
+
+* **board-managers:** make config hot-reload immune to dropped fs events ([2c2dd2a](https://github.com/bitsocialnet/5chan-board-manager/commit/2c2dd2a4eb6ffdd79a21bf3e57aab86afa0a7610))
+
 ## [0.2.18](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.17...v0.2.18) (2026-07-09)
 
 ## [0.2.17](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.16...v0.2.17) (2026-05-20)
