@@ -66,7 +66,7 @@
     "kubo": "0.41.0",
     "oclif": "4.22.59",
     "release-it": "19.2.4",
-    "typescript": "5.9.3",
+    "typescript": "7.0.2",
     "vitest": "4.0.18"
   },
   "config": {
