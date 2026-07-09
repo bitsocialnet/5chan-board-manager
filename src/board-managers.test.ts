@@ -14,8 +14,22 @@ import { startBoardManager } from './board-manager.js'
 
 const mockStartBoardManager = vi.mocked(startBoardManager)
 
+// Watcher-driven tests poll for up to 30s (see waitForReload); when every core
+// is saturated (full-suite parallel workers plus other builds on the machine)
+// the watcher's poll timers can starve for several seconds, so both the poll
+// window and the test timeout need generous headroom. Healthy runs still
+// finish in a few hundred ms — the poll returns as soon as the state matches.
+vi.setConfig({ testTimeout: 60_000 })
+
 function makeStopFn(): BoardManagerResult['stop'] {
   return vi.fn<() => Promise<void>>().mockResolvedValue(undefined)
+}
+
+// Poll until the watcher pipeline (chokidar awaitWriteFinish + debounce +
+// handleConfigChange) has produced the expected state, instead of sleeping a
+// fixed amount — fs-event latency varies wildly with machine load.
+function waitForReload(assertions: () => void): Promise<void> {
+  return vi.waitFor(assertions, { timeout: 30_000, interval: 50 })
 }
 
 function makeTmpDir(): string {
@@ -180,11 +194,10 @@ describe('startBoardManagers', () => {
       // Add a board config file (simulating "5chan board add")
       writeBoardConfig(dir, { address: 'new.bso' })
 
-      // Wait for debounce + async handling
-      await new Promise((r) => setTimeout(r, 500))
-
-      expect(manager.boardManagers.size).toBe(1)
-      expect(manager.boardManagers.has('new.bso')).toBe(true)
+      await waitForReload(() => {
+        expect(manager.boardManagers.size).toBe(1)
+        expect(manager.boardManagers.has('new.bso')).toBe(true)
+      })
 
       await manager.stop()
     })
@@ -208,11 +221,10 @@ describe('startBoardManagers', () => {
       // Add new board config file
       writeBoardConfig(dir, { address: 'new.bso' })
 
-      // Wait for debounce + async handling
-      await new Promise((r) => setTimeout(r, 500))
-
-      expect(manager.boardManagers.size).toBe(2)
-      expect(manager.boardManagers.has('new.bso')).toBe(true)
+      await waitForReload(() => {
+        expect(manager.boardManagers.size).toBe(2)
+        expect(manager.boardManagers.has('new.bso')).toBe(true)
+      })
 
       await manager.stop()
     })
@@ -236,13 +248,12 @@ describe('startBoardManagers', () => {
       // Update board config file with changed bumpLimit
       writeBoardConfig(dir, { address: 'a.bso', bumpLimit: 500 })
 
-      // Wait for debounce + async handling
-      await new Promise((r) => setTimeout(r, 500))
-
-      expect(stopA).toHaveBeenCalledOnce()
-      expect(mockStartBoardManager).toHaveBeenCalledTimes(2)
-      expect(manager.boardManagers.size).toBe(1)
-      expect(manager.boardManagers.has('a.bso')).toBe(true)
+      await waitForReload(() => {
+        expect(stopA).toHaveBeenCalledOnce()
+        expect(mockStartBoardManager).toHaveBeenCalledTimes(2)
+        expect(manager.boardManagers.size).toBe(1)
+        expect(manager.boardManagers.has('a.bso')).toBe(true)
+      })
 
       await manager.stop()
     })
@@ -268,11 +279,10 @@ describe('startBoardManagers', () => {
       // Update global config with changed userAgent
       writeGlobalConfig(dir, { userAgent: 'new-agent:2.0' })
 
-      // Wait for debounce + async handling
-      await new Promise((r) => setTimeout(r, 500))
-
-      expect(stopA).toHaveBeenCalledOnce()
-      expect(mockStartBoardManager).toHaveBeenCalledTimes(2)
+      await waitForReload(() => {
+        expect(stopA).toHaveBeenCalledOnce()
+        expect(mockStartBoardManager).toHaveBeenCalledTimes(2)
+      })
 
       await manager.stop()
     })
@@ -295,13 +305,12 @@ describe('startBoardManagers', () => {
       // Update board config file with changed bumpLimit
       writeBoardConfig(dir, { address: 'a.bso', bumpLimit: 500 })
 
-      // Wait for debounce + async handling
-      await new Promise((r) => setTimeout(r, 500))
-
-      expect(stopA).toHaveBeenCalledOnce()
-      expect(manager.boardManagers.has('a.bso')).toBe(false)
-      expect(manager.errors.size).toBe(1)
-      expect(manager.errors.get('a.bso')?.message).toBe('restart failed')
+      await waitForReload(() => {
+        expect(stopA).toHaveBeenCalledOnce()
+        expect(manager.boardManagers.has('a.bso')).toBe(false)
+        expect(manager.errors.size).toBe(1)
+        expect(manager.errors.get('a.bso')?.message).toBe('restart failed')
+      })
 
       await manager.stop()
     })
@@ -323,11 +332,10 @@ describe('startBoardManagers', () => {
 
       saveBoardConfig(dir, { address: 'new.bso' })
 
-      // Wait for debounce + chokidar awaitWriteFinish + handleConfigChange
-      await new Promise((r) => setTimeout(r, 600))
-
-      expect(manager.boardManagers.size).toBe(1)
-      expect(manager.boardManagers.has('new.bso')).toBe(true)
+      await waitForReload(() => {
+        expect(manager.boardManagers.size).toBe(1)
+        expect(manager.boardManagers.has('new.bso')).toBe(true)
+      })
 
       await manager.stop()
     })
@@ -352,13 +360,55 @@ describe('startBoardManagers', () => {
       // Remove board config directory
       rmSync(join(dir, 'boards', 'b.bso'), { recursive: true })
 
-      // Wait for debounce + async handling
-      await new Promise((r) => setTimeout(r, 500))
+      await waitForReload(() => {
+        expect(manager.boardManagers.size).toBe(1)
+        expect(manager.boardManagers.has('a.bso')).toBe(true)
+        expect(manager.boardManagers.has('b.bso')).toBe(false)
+        expect(stopB).toHaveBeenCalledOnce()
+      })
 
-      expect(manager.boardManagers.size).toBe(1)
-      expect(manager.boardManagers.has('a.bso')).toBe(true)
-      expect(manager.boardManagers.has('b.bso')).toBe(false)
-      expect(stopB).toHaveBeenCalledOnce()
+      await manager.stop()
+    })
+
+    it('does not drop a config change that arrives during an active reload', async () => {
+      // Regression test: handleConfigChange used to bail out when a reload was
+      // already running, silently dropping the change until the next unrelated
+      // fs event. The change must instead be queued and applied right after.
+      const stopA = makeStopFn()
+      const stopB = makeStopFn()
+      let releaseFirstStart!: () => void
+      const firstStartGate = new Promise<void>((resolve) => {
+        releaseFirstStart = resolve
+      })
+      mockStartBoardManager
+        .mockImplementationOnce(async () => {
+          await firstStartGate
+          return { stop: stopA }
+        })
+        .mockResolvedValueOnce({ stop: stopB })
+
+      const dir = tmpDir()
+      const manager = await startBoardManagers(dir, { boards: [] })
+
+      // First change starts a reload that blocks inside startBoardManager
+      writeBoardConfig(dir, { address: 'a.bso' })
+      await waitForReload(() => {
+        expect(mockStartBoardManager).toHaveBeenCalledTimes(1)
+      })
+
+      // Second change arrives while that reload is still in progress; wait long
+      // enough for its watcher event + debounce to fire into the reload window
+      writeBoardConfig(dir, { address: 'b.bso' })
+      await new Promise((r) => setTimeout(r, 1500))
+      expect(mockStartBoardManager).toHaveBeenCalledTimes(1)
+
+      releaseFirstStart()
+
+      await waitForReload(() => {
+        expect(manager.boardManagers.size).toBe(2)
+        expect(manager.boardManagers.has('a.bso')).toBe(true)
+        expect(manager.boardManagers.has('b.bso')).toBe(true)
+      })
 
       await manager.stop()
     })

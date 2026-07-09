@@ -39,6 +39,7 @@ export async function startBoardManagers(
   const errors = new Map<string, Error>()
   let currentConfig = initialConfig
   let reloading = false
+  let reloadPending = false
   let stopped = false
 
   function onAddressChange(oldAddress: string, newAddress: string): void {
@@ -95,88 +96,102 @@ export async function startBoardManagers(
   }
 
   async function handleConfigChange(): Promise<void> {
-    if (reloading || stopped) return
+    if (stopped) return
+    if (reloading) {
+      // A reload is already running — remember that another change arrived so
+      // it gets picked up right after, instead of being dropped until the next
+      // unrelated fs event.
+      reloadPending = true
+      return
+    }
     reloading = true
 
     try {
-      let newConfig: MultiBoardConfig
-      try {
-        newConfig = loadConfig(configDir)
-      } catch (err) {
-        log.error(`failed to reload config: ${(err as Error).message}`)
-        return
-      }
-
-      const { added, removed, changed } = diffConfigsWithGlobal(currentConfig, newConfig)
-
-      if (added.length === 0 && removed.length === 0 && changed.length === 0) {
-        currentConfig = newConfig
-        return
-      }
-
-      // Stop removed board managers
-      for (const address of removed) {
-        const manager = boardManagers.get(address)
-        if (manager) {
-          try {
-            log(`stopping board manager for removed board ${address}`)
-            await manager.stop()
-          } catch (err) {
-            log.error(`failed to stop board manager for ${address}: ${err}`)
-          }
-          boardManagers.delete(address)
-        }
-        errors.delete(address)
-      }
-
-      // Restart changed board managers
-      for (const board of changed) {
-        const manager = boardManagers.get(board.address)
-        if (manager) {
-          try {
-            log(`stopping board manager for changed board ${board.address}`)
-            await manager.stop()
-          } catch (err) {
-            log.error(`failed to stop board manager for ${board.address}: ${err}`)
-          }
-          boardManagers.delete(board.address)
-        }
-        errors.delete(board.address)
-
-        const options = resolveBoardManagerOptions(board, newConfig, configDir)
-        try {
-          log(`starting board manager for changed board ${board.address}`)
-          const result = await startBoardManager({ ...options, ...runtimeOptions, onAddressChange })
-          boardManagers.set(board.address, result)
-        } catch (err) {
-          const error = err instanceof Error ? err : new Error(String(err))
-          log.error(`failed to start board manager for ${board.address}: ${error.message}`)
-          errors.set(board.address, error)
-        }
-      }
-
-      // Start added board managers
-      for (const board of added) {
-        const options = resolveBoardManagerOptions(board, newConfig, configDir)
-        try {
-          log(`starting board manager for added board ${board.address}`)
-          const result = await startBoardManager({ ...options, ...runtimeOptions, onAddressChange })
-          boardManagers.set(board.address, result)
-          errors.delete(board.address)
-        } catch (err) {
-          const error = err instanceof Error ? err : new Error(String(err))
-          log.error(`failed to start board manager for ${board.address}: ${error.message}`)
-          errors.set(board.address, error)
-        }
-      }
-
-      currentConfig = newConfig
-
-      if (added.length > 0 || removed.length > 0 || changed.length > 0) {
-        log(`config reloaded: +${added.length} added, -${removed.length} removed, ~${changed.length} changed, ${boardManagers.size} running`)
-      }
+      do {
+        reloadPending = false
+        await reloadOnce()
+      } while (reloadPending && !stopped)
     } finally {
       reloading = false
+    }
+  }
+
+  async function reloadOnce(): Promise<void> {
+    let newConfig: MultiBoardConfig
+    try {
+      newConfig = loadConfig(configDir)
+    } catch (err) {
+      log.error(`failed to reload config: ${(err as Error).message}`)
+      return
+    }
+
+    const { added, removed, changed } = diffConfigsWithGlobal(currentConfig, newConfig)
+
+    if (added.length === 0 && removed.length === 0 && changed.length === 0) {
+      currentConfig = newConfig
+      return
+    }
+
+    // Stop removed board managers
+    for (const address of removed) {
+      const manager = boardManagers.get(address)
+      if (manager) {
+        try {
+          log(`stopping board manager for removed board ${address}`)
+          await manager.stop()
+        } catch (err) {
+          log.error(`failed to stop board manager for ${address}: ${err}`)
+        }
+        boardManagers.delete(address)
+      }
+      errors.delete(address)
+    }
+
+    // Restart changed board managers
+    for (const board of changed) {
+      const manager = boardManagers.get(board.address)
+      if (manager) {
+        try {
+          log(`stopping board manager for changed board ${board.address}`)
+          await manager.stop()
+        } catch (err) {
+          log.error(`failed to stop board manager for ${board.address}: ${err}`)
+        }
+        boardManagers.delete(board.address)
+      }
+      errors.delete(board.address)
+
+      const options = resolveBoardManagerOptions(board, newConfig, configDir)
+      try {
+        log(`starting board manager for changed board ${board.address}`)
+        const result = await startBoardManager({ ...options, ...runtimeOptions, onAddressChange })
+        boardManagers.set(board.address, result)
+      } catch (err) {
+        const error = err instanceof Error ? err : new Error(String(err))
+        log.error(`failed to start board manager for ${board.address}: ${error.message}`)
+        errors.set(board.address, error)
+      }
+    }
+
+    // Start added board managers
+    for (const board of added) {
+      const options = resolveBoardManagerOptions(board, newConfig, configDir)
+      try {
+        log(`starting board manager for added board ${board.address}`)
+        const result = await startBoardManager({ ...options, ...runtimeOptions, onAddressChange })
+        boardManagers.set(board.address, result)
+        errors.delete(board.address)
+      } catch (err) {
+        const error = err instanceof Error ? err : new Error(String(err))
+        log.error(`failed to start board manager for ${board.address}: ${error.message}`)
+        errors.set(board.address, error)
+      }
+    }
+
+    currentConfig = newConfig
+
+    if (added.length > 0 || removed.length > 0 || changed.length > 0) {
+      log(`config reloaded: +${added.length} added, -${removed.length} removed, ~${changed.length} changed, ${boardManagers.size} running`)
     }
   }
 
@@ -195,11 +210,17 @@ export async function startBoardManagers(
   // Watch boards/ directory via chokidar — manages per-subdirectory inotify
   // watches explicitly, avoiding the native fs.watch recursive race where
   // events for files created inside brand-new subdirectories can be lost.
+  // On macOS (dev machines only — production is Linux/Docker per AGENTS.md),
+  // fs.watch is FSEvents-backed and can silently drop events that occur right
+  // after the watcher reports ready, so fall back to stat-polling there; the
+  // config tree is tiny, making the polling cost negligible.
+  const usePolling = process.platform === 'darwin'
   const boardsDir = join(configDir, 'boards')
   mkdirSync(boardsDir, { recursive: true })
   const boardsWatcher = chokidar.watch(boardsDir, {
     ignoreInitial: true,
     persistent: true,
+    usePolling,
     awaitWriteFinish: {
       stabilityThreshold: 100,
       pollInterval: 50,
@@ -213,6 +234,7 @@ export async function startBoardManagers(
   const globalWatcher = chokidar.watch(globalPath, {
     ignoreInitial: true,
     persistent: true,
+    usePolling,
   })
   globalWatcher.on('all', triggerReload)
   watchers.push(globalWatcher)
@@ -225,6 +247,16 @@ export async function startBoardManagers(
     new Promise<void>((resolve) => globalWatcher.once('ready', () => resolve())),
   ])
 
+  // Safety net: fs watchers can drop events entirely (inotify queue overflow
+  // on Linux, FSEvents/startup races on macOS dev machines), which would leave
+  // a config change unapplied until the next unrelated fs event. Reloads are
+  // diff-based and idempotent, and the config tree is tiny, so periodically
+  // reconcile against disk as a guaranteed fallback to the watcher fast path.
+  const reconcileTimer = setInterval(() => {
+    handleConfigChange()
+  }, 2000)
+  reconcileTimer.unref()
+
   return {
     get boardManagers() {
       return boardManagers as ReadonlyMap<string, BoardManagerResult>
@@ -234,6 +266,7 @@ export async function startBoardManagers(
     },
     async stop() {
       stopped = true
+      clearInterval(reconcileTimer)
       if (debounceTimer) clearTimeout(debounceTimer)
       await Promise.all(watchers.map((w) => w.close()))
       const results = await Promise.allSettled(

@@ -545,7 +545,7 @@ _See code: [src/commands/start.ts](https://github.com/bitsocialnet/5chan-board-m
 
 ## Config Hot-Reload
 
-`5chan start` watches the config directory (`boards/` and `global.json`) using `fs.watch()` with a 200ms debounce. When any config file changes:
+`5chan start` watches the config directory (`boards/` and `global.json`) using chokidar with a 200ms debounce, plus a periodic reconcile (every 2s) that guarantees changes are picked up even if the OS watcher drops events (e.g. inotify queue overflow). Changes that arrive while a reload is already running are queued and applied right after it. When any config file changes:
 
 1. Loads and validates the new config
 2. Diffs old vs new boards
