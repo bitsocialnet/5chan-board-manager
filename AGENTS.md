@@ -1,6 +1,9 @@
 - Communities are the equivalent pkc-js term for "board" in 5chan
 - Communities are essentially the same as boards in 5chan
 - Every new feature or bug fix must include a test case that reproduces/covers it
+- A bug fix requires either a reproduction of the reported behavior or conclusive source/runtime evidence that identifies both the defect and the correct fix with equivalent certainty.
+- If the bug cannot be reproduced and the evidence is not conclusive, do not guess or make speculative changes. Report what was checked, say that the bug was not reproduced, and ask for the missing reproduction details when useful.
+- When proceeding from conclusive evidence without a reproduction, explain why the evidence is sufficient and add a targeted regression test when practical.
 - Never use `any` — always use proper types
 - After modifying any file under `src/`, run `npx tsc --noEmit` to verify the build has no type errors, then run `npm run build` so `dist/` stays in sync
 - After modifying types in `src/types.ts`, run `npx tsc --noEmit` to ensure all dependents still compile
