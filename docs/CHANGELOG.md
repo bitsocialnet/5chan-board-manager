@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.20](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.19...v0.2.20) (2026-07-23)
+
+### Features
+
+* **defaults:** enable thumbnail metadata fetching ([0cd8105](https://github.com/bitsocialnet/5chan-board-manager/commit/0cd8105c79fa4767444f3c495a763f9b09969f7c))
+
 ## [0.2.19](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.18...v0.2.19) (2026-07-09)
 
 ### Bug Fixes
