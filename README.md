@@ -217,6 +217,10 @@ docker run -d -v /path/to/data:/data 5chan-board-manager
 
 If you are not using the Docker quick usage flow above, create the board with `bitsocial community create` first, then add it to 5chan with `5chan board add`.
 
+> **Media rendering:** Keep `settings.fetchThumbnailUrls` enabled for 5chan boards. Bitsocial publications store media links, not uploaded media files, so clients need the thumbnail metadata fetched by the community node to know image and video dimensions before rendering. Without it, clients must fall back to generic containers that can size media poorly or cause layout shifts.
+>
+> The bundled preset enables this setting for new boards. By default, the community node fetches media links directly, which exposes the node's IP address to those hosts. Operators who need to hide the node's IP should also configure `settings.fetchThumbnailUrlsProxyUrl`.
+
 Run `5chan board add --help` for full details on preset defaults flags (`--apply-defaults`, `--skip-apply-defaults`, `--interactive-apply-defaults`). In interactive terminals, defaults are shown with an `[A]ccept / [M]odify / [S]kip` prompt; choosing Modify opens the preset in `$EDITOR` as an annotated JSONC file with `//` comments explaining each field.
 
 Preset JSONC is validated with Zod. Both plain JSON and JSONC (with `//` comments) are accepted as preset files.

@@ -90,6 +90,12 @@ describe('community defaults preset loading', () => {
     expect(preset.boardManagerSettings.perPage).toBe(15)
   })
 
+  it('enables thumbnail metadata fetching in the bundled board preset', async () => {
+    const preset = await loadCommunityDefaultsPreset()
+
+    expect(preset.boardSettings.settings?.fetchThumbnailUrls).toBe(true)
+  })
+
   it('loads a valid preset jsonc file with comments', async () => {
     const dir = tmpDir()
     const presetPath = join(dir, 'preset.jsonc')

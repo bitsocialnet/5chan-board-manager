@@ -46,6 +46,13 @@
       "pseudonymityMode": "per-post",
     },
     "settings": {
+      // Fetch metadata for link-hosted media so clients know image/video dimensions
+      // before rendering. Bitsocial publications contain links rather than uploaded
+      // media files, so without this metadata clients must use generic wrappers that
+      // can cause poor sizing and layout shifts. The node fetches these links directly
+      // unless fetchThumbnailUrlsProxyUrl is also configured.
+      "fetchThumbnailUrls": true,
+
       // Challenge rules that control anti-spam and captcha behavior.
       // Each entry defines a challenge with a "name", "description", and "exclude" rules.
       // Challenges are evaluated in order; the first match is presented to the user.
