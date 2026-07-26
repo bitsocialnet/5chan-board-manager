@@ -67,11 +67,51 @@
     "oclif": "4.22.59",
     "release-it": "19.2.4",
     "typescript": "7.0.2",
-    "vitest": "4.0.18"
+    "vitest": "4.1.10"
   },
   "config": {
     "commitizen": {
       "path": "cz-conventional-changelog"
     }
+  },
+  "overrides": {
+    "@babel/core": "7.29.6",
+    "@libp2p/gossipsub": "16.0.4",
+    "@libp2p/kad-dht": "16.2.6",
+    "@protobufjs/utf8": "1.1.1",
+    "axios": "1.18.1",
+    "basic-ftp": "5.3.1",
+    "brace-expansion@1": "1.1.16",
+    "brace-expansion@2": "2.1.2",
+    "brace-expansion@5": "5.0.8",
+    "defu": "6.1.5",
+    "esbuild": "0.28.1",
+    "fast-uri": "3.1.4",
+    "fast-xml-parser": "5.7.0",
+    "follow-redirects": "1.16.0",
+    "form-data": "4.0.6",
+    "handlebars": "4.7.9",
+    "ip-address": "10.1.1",
+    "js-yaml@3": "3.15.0",
+    "js-yaml@4": "4.3.0",
+    "lodash": "4.18.1",
+    "minimatch@3": "3.1.4",
+    "minimatch@5": "5.1.8",
+    "minimatch@9": "9.0.7",
+    "node-forge": "1.4.0",
+    "picomatch@2": "2.3.2",
+    "picomatch@4": "4.0.4",
+    "postcss": "8.5.23",
+    "protobufjs@6": "7.6.5",
+    "rollup": "4.59.0",
+    "shell-quote": "1.9.0",
+    "tmp": "0.2.7",
+    "undici@6": "6.27.0",
+    "undici@7": "7.28.0",
+    "uuid@11": "11.1.1",
+    "uuid@13": "13.0.1",
+    "ws@7": "7.5.13",
+    "ws@8": "8.21.0",
+    "yaml@2": "2.8.3"
   }
 }
