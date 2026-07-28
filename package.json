@@ -53,6 +53,7 @@
     "@pkcprotocol/proper-lock-file": "4.2.1",
     "chokidar": "5.0.0",
     "env-paths": "3.0.0",
+    "quick-lru": "5.1.1",
     "strip-json-comments": "5.0.3",
     "zod": "4.3.6"
   },
