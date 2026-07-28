@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.23](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.22...v0.2.23) (2026-07-28)
+
+### Bug Fixes
+
+* **deps:** declare quick-lru so the Docker image can start ([4507c83](https://github.com/bitsocialnet/5chan-board-manager/commit/4507c8300403f103b9bd6740d0c8aa020a6e41aa))
+* **deps:** restore utf-8-validate entries dropped from the lock file ([2b38814](https://github.com/bitsocialnet/5chan-board-manager/commit/2b3881401d0ab89a68e8823a44b9c767c21c7447))
+
 ## [0.2.22](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.21...v0.2.22) (2026-07-28)
 
 ## [0.2.21](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.20...v0.2.21) (2026-07-26)
