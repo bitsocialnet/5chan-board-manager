@@ -1,0 +1,61 @@
+name: Warm Docker cache
+
+# Sole writer of the `type=gha` Docker layer cache.
+#
+# Since GitHub's 2026-06-26 "read-only Actions cache for untrusted triggers"
+# change, only trusted triggers (push, schedule, workflow_dispatch, ...) get a
+# cache token with writable scopes. "Docker CI + Publish" runs on workflow_run,
+# so every `cache-to: type=gha` there fails hard with
+#   ERROR: failed to solve: error writing layer blob: failed to reserve cache
+# and adding `permissions: actions: write` does not help — the restriction is on
+# the trigger, not the token's declared scopes.
+#
+# So cache writing lives here, on a push trigger, and "Docker CI + Publish" only
+# ever reads (`cache-from: type=gha,scope=warm`).
+# https://github.blog/changelog/2026-06-26-read-only-actions-cache-for-untrusted-triggers/
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "src/**"
+      - "bin/**"
+      - "Dockerfile"
+      - "docker-compose*.yml"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig.json"
+      - ".github/workflows/docker-cache-warm.yml"
+  workflow_dispatch:
+
+# Superseded pushes have nothing useful left to warm.
+concurrency:
+  group: docker-cache-warm
+  cancel-in-progress: true
+
+jobs:
+  warm:
+    name: Warm multi-arch cache
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build multi-arch (cache only)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha,scope=warm
+          cache-to: type=gha,mode=max,scope=warm

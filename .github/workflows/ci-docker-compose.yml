@@ -38,8 +38,9 @@ jobs:
           context: .
           load: true
           tags: 5chan-board-manager:ci-test
-          cache-from: type=gha,scope=build
-          cache-to: type=gha,mode=max,scope=build
+          # Read-only: this workflow runs on workflow_run, whose cache token has
+          # no writable scopes. "Warm Docker cache" (push) does the writing.
+          cache-from: type=gha,scope=warm
 
       - name: Save image to tarball
         run: docker save 5chan-board-manager:ci-test -o /tmp/5chan-image.tar
@@ -50,29 +51,6 @@ jobs:
           name: 5chan-image
           path: /tmp/5chan-image.tar
           retention-days: 1
-
-  warm-cache:
-    name: Warm multi-arch cache
-    if: ${{ github.event_name == 'pull_request' || github.event.workflow_run.conclusion == 'success' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      - name: Build multi-arch (cache only)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: false
-          platforms: linux/amd64,linux/arm64
-          cache-from: |
-            type=gha,scope=warm
-            type=gha,scope=publish
-          cache-to: type=gha,mode=max,scope=warm
 
   full-stack:
     name: Full-stack (bitsocial + 5chan)
@@ -328,7 +306,7 @@ jobs:
   # Publishes the multi-arch Docker image to ghcr.io once gating jobs pass.
   publish:
     name: Publish Docker image
-    needs: [full-stack, standalone, warm-cache]
+    needs: [full-stack, standalone]
     if: |
       always() &&
       github.event_name == 'workflow_run' &&
@@ -388,7 +366,6 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: |
-            type=gha,scope=warm
-            type=gha,scope=publish
-          cache-to: type=gha,mode=max,scope=publish
+          # Read-only — see the note on the build job. The `warm` scope is
+          # populated by the "Warm Docker cache" workflow on push to master.
+          cache-from: type=gha,scope=warm
