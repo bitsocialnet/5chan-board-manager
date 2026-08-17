@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -12,8 +12,10 @@ import {
   applyCommunityDefaultsToBoard,
   buildCommunityDefaultsPatch,
   buildMissingObjectPatch,
+  getParseCommunityEditOptions,
   loadCommunityDefaultsPreset,
   loadCommunityDefaultsPresetRaw,
+  resolvePkcSchemaUtilPath,
   setParseCommunityEditOptionsOverrideForTests,
 } from './community-defaults.js'
 import type { PKCInstance, Community } from './types.js'
@@ -195,6 +197,36 @@ describe('community defaults preset loading', () => {
     const preset = await loadCommunityDefaultsPreset(presetPath)
     expect(preset.boardManagerSettings.moderationReasons?.archiveCapacity).toBe('custom capacity')
     expect(preset.boardManagerSettings.moderationReasons?.purgeDeleted).toBe('custom purge')
+  })
+})
+
+// Regression coverage for the pkc-js upgrade (0.0.22 -> 0.0.82). The main
+// entrypoint now resolves into `dist/bundled/`, which has no `schema/`
+// directory, so deriving the schema-util path from it silently produced a
+// non-existent path. Every other test in this file stubs the parser out, so
+// only these exercise the real resolution against the installed pkc-js.
+describe('pkc-js schema-util resolution', () => {
+  beforeEach(() => {
+    setParseCommunityEditOptionsOverrideForTests(undefined)
+  })
+
+  it('resolves schema-util to a file that exists in the installed pkc-js', () => {
+    const schemaUtilPath = resolvePkcSchemaUtilPath()
+    expect(existsSync(schemaUtilPath)).toBe(true)
+    expect(schemaUtilPath.endsWith(join('schema', 'schema-util.js'))).toBe(true)
+  })
+
+  it('loads a working parseCommunityEditOptions from the installed pkc-js', async () => {
+    const parse = await getParseCommunityEditOptions()
+    expect(parse({ title: 'a board' })).toMatchObject({ title: 'a board' })
+    expect(() => parse({ features: { pseudonymityMode: 'nope' } } as never)).toThrow()
+  })
+
+  it('validates the shipped community-defaults preset against the real pkc-js schema', async () => {
+    const preset = await loadCommunityDefaultsPreset()
+    expect(preset.boardSettings.features?.pseudonymityMode).toBe('per-post')
+    expect(preset.boardSettings.settings?.challenges).toHaveLength(4)
+    expect(preset.boardManagerSettings.perPage).toBe(15)
   })
 })
 
