@@ -198,7 +198,10 @@ describe('board manager E2E', () => {
         const t2 = await publishThread(pkc, address, 'New Thread')
         await waitForThreadInPages(sub, t2.cid)
 
-        // capacity=1, purge after 5 seconds
+        // capacity=1, purge after 5 seconds.
+        // The board goes quiet once T1 is archived, so no further `update` events
+        // are guaranteed to arrive — the purge sweep is what makes this
+        // deterministic rather than a race against unrelated board activity.
         boardManager = await startBoardManager({
           communityAddress: address,
           pkcRpcUrl: RPC_URL,
@@ -206,6 +209,7 @@ describe('board manager E2E', () => {
           perPage: 1,
           pages: 1,
           archivePurgeSeconds: 5,
+          purgeSweepIntervalMs: 1_000,
         })
 
         // T1 should get archived first (beyond capacity)
@@ -215,7 +219,7 @@ describe('board manager E2E', () => {
         const stateBeforePurge = readStateFile(statePath)
         expect(stateBeforePurge.archivedThreads[t1.cid]).toBeDefined()
 
-        // Wait for purge (5s purge + polling time)
+        // Wait for purge (5s retention + up to one sweep interval)
         await waitForPurgedFromState(statePath, t1.cid, 60_000)
 
         // Verify T1 removed from state (purged)

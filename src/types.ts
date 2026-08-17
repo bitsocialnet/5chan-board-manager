@@ -36,6 +36,15 @@ export interface BoardManagerOptions {
   archivePurgeSeconds?: number
   moderationReasons?: ModerationReasons
   onAddressChange?: (oldAddress: string, newAddress: string) => void
+  /**
+   * How often to sweep for archived threads whose retention has expired, in ms.
+   * Archiving is driven by community `update` events, but purging is time-based:
+   * a quiet board emits no updates, so without this sweep an expired thread would
+   * sit in the archive until unrelated activity happened to wake the manager.
+   * Defaults from `PURGE_SWEEP_INTERVAL_SECONDS` env or 60_000. Set to `0` to
+   * disable the sweep entirely, leaving purges to happen only on update events.
+   */
+  purgeSweepIntervalMs?: number
   /** Path to a shared heartbeat file the board ticks `mtime` on. Disabled if undefined. */
   heartbeatPath?: string
   /** Heartbeat tick interval in ms. Defaults from `HEARTBEAT_INTERVAL_SECONDS` env or 300_000. */
