@@ -1,5 +1,5 @@
 import { connectToPkcRpc } from './pkc-rpc.js'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -54,6 +54,53 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+/**
+ * Locate pkc-js's `schema-util.js`, which owns the canonical
+ * `CommunityEditOptions` validation used to check the preset before publishing.
+ *
+ * It is an internal module: pkc-js exports neither the parser from its public
+ * entrypoints nor `./package.json` from its `exports` map, so it has to be
+ * reached by file path. The path cannot be derived from the main entrypoint —
+ * since 0.0.23 that resolves into `dist/bundled/`, which ships as a flattened
+ * bundle with no `schema/` directory. The unbundled `dist/node/` tree is the
+ * stable location across versions, so resolve relative to the package root.
+ */
+export function resolvePkcSchemaUtilPath(): string {
+  const entrypointPath = require.resolve('@pkcprotocol/pkc-js')
+  const packageRoot = findPkcPackageRoot(entrypointPath)
+
+  const candidates = [
+    join(packageRoot, 'dist', 'node', 'schema', 'schema-util.js'),
+    // Pre-0.0.23 layout, where the entrypoint sat next to `schema/` itself.
+    join(dirname(entrypointPath), 'schema', 'schema-util.js'),
+  ]
+
+  const schemaUtilModulePath = candidates.find((candidate) => existsSync(candidate))
+  if (!schemaUtilModulePath) {
+    throw new Error(
+      `Failed to locate pkc-js schema-util module; tried: ${candidates.join(', ')}`,
+    )
+  }
+
+  return schemaUtilModulePath
+}
+
+/** Walk up from a resolved pkc-js file to the directory holding its `package.json`. */
+function findPkcPackageRoot(entrypointPath: string): string {
+  let dir = dirname(entrypointPath)
+
+  while (true) {
+    if (existsSync(join(dir, 'package.json'))) {
+      return dir
+    }
+    const parent = dirname(dir)
+    if (parent === dir) {
+      throw new Error(`Failed to locate the @pkcprotocol/pkc-js package root from "${entrypointPath}"`)
+    }
+    dir = parent
+  }
+}
+
 export async function getParseCommunityEditOptions(): Promise<ParseCommunityEditOptionsFn> {
   if (parseCommunityEditOptionsOverride) {
     return parseCommunityEditOptionsOverride
@@ -61,8 +108,7 @@ export async function getParseCommunityEditOptions(): Promise<ParseCommunityEdit
 
   if (!parseCommunityEditOptionsPromise) {
     parseCommunityEditOptionsPromise = (async () => {
-      const pkcEntrypointPath = require.resolve('@pkcprotocol/pkc-js')
-      const schemaUtilModulePath = join(dirname(pkcEntrypointPath), 'schema', 'schema-util.js')
+      const schemaUtilModulePath = resolvePkcSchemaUtilPath()
       const schemaUtilModule = (await import(pathToFileURL(schemaUtilModulePath).href)) as {
         parseCommunityEditOptionsSchemaWithPKCErrorIfItFails?: ParseCommunityEditOptionsFn
       }
