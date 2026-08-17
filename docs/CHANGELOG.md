@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.24](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.23...v0.2.24) (2026-08-17)
+
+### Bug Fixes
+
+* **deps:** upgrade pkc-js to 0.0.82 and repair schema-util resolution ([97db76f](https://github.com/bitsocialnet/5chan-board-manager/commit/97db76fd229341f7b5abd8e92968573974cb71c7))
+
 ## [0.2.23](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.22...v0.2.23) (2026-07-28)
 
 ### Bug Fixes
