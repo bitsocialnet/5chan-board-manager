@@ -10,3 +10,5 @@
 - The project runs exclusively in Docker (Linux containers) — no need to support macOS or Windows natively
 - Assume environment is node v22+
 - When changing functionality (new features, refactors, CLI changes, etc.), update README.md if the change affects documented behavior, commands, APIs, or examples
+- Never commit directly to `master` — every change ships as a PR, the same way pkc-js does it. Branch off `master`, commit there, push, and open a PR
+- Keep one concern per branch/PR — do not mix unrelated changes (e.g. a dependency upgrade and an unrelated bug fix) into the same PR
