@@ -18,6 +18,7 @@ A CLI tool that implements 4chan-style thread auto-archiving and purging for 5ch
 
 - Track when threads were archived
 - After `archive_purge_seconds` has elapsed since archiving → purge via `createCommentModeration({ commentModeration: { purged: true } })`
+- Purging is time-based rather than activity-based, so it also runs on a periodic sweep (`PURGE_SWEEP_INTERVAL_SECONDS`, default 60s) instead of only when a `community.update` event arrives. Without the sweep, a board that went quiet after archiving would keep expired threads in the archive until unrelated activity woke the manager.
 
 ### Feature 4: Author-deleted comment purging
 
@@ -571,6 +572,18 @@ Each board manager acquires a PID-based lock file (`{statePath}.lock`) to preven
 
 The lock is released when the board manager stops.
 
+## Purge Sweep
+
+Archiving is driven by `community.update` events, because it depends on board activity (new threads pushing old ones past capacity, replies hitting the bump limit). Purging is different: once a thread is archived, only the clock decides when its retention expires.
+
+So the board manager also runs a periodic sweep that purges archived threads whose `archivePurgeSeconds` has elapsed, independent of update events. A board that goes quiet right after archiving would otherwise keep expired threads in the archive indefinitely, since nothing would trigger the update handler.
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `PURGE_SWEEP_INTERVAL_SECONDS` | `60` | How often to check for archived threads past their retention window. Set to `0` to disable the sweep and fall back to purging on update events only. |
+
+The sweep does no network fetching — it reads the archived-thread timestamps already held in the state file, and only publishes when something is genuinely due. It is serialized against the update handler, so a thread is never purged twice concurrently.
+
 ## Author-Deleted Comment Purging
 
 The board manager detects comments and replies that were deleted by their author (where `comment.deleted === true`) and purges them via `createCommentModeration({ commentModeration: { purged: true } })`. Once purged, the comment is removed from the board and won't appear in future listings. If a purge hasn't been processed yet, the next cycle may re-publish a redundant purge moderation, which is a harmless no-op.
@@ -836,6 +849,9 @@ Reference: `pkc-js/src/community/community-client-manager.ts`, `pkc-js/src/runti
       - Remove from state file
    g. For each author-deleted comment/reply:
       - createCommentModeration({ purged: true }) and publish
+
+5. Every PURGE_SWEEP_INTERVAL_SECONDS, independent of update events:
+   - Run step (f) again, so time-based purging still happens on a quiet board
 ```
 
 ### Key pkc-js APIs used

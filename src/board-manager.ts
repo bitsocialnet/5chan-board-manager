@@ -12,6 +12,7 @@ const DEFAULTS = {
   pages: 10,
   bumpLimit: 300,
   archivePurgeSeconds: 172800,
+  purgeSweepIntervalMs: 60_000,
   moderationReasons: {
     archiveCapacity: '5chan board manager: thread archived — exceeded board capacity',
     archiveBumpLimit: '5chan board manager: thread archived — reached bump limit',
@@ -19,6 +20,28 @@ const DEFAULTS = {
     purgeDeleted: '5chan board manager: content purged — author-deleted',
   },
 } as const
+
+/**
+ * Resolve the purge sweep cadence from an explicit option or the environment.
+ *
+ * `0` disables the sweep deliberately. A malformed env value parses to `NaN`,
+ * which would otherwise disable purging silently, so it falls back to the
+ * default instead.
+ */
+export function resolvePurgeSweepIntervalMs(
+  optionValue: number | undefined,
+  envValue: string | undefined,
+): number {
+  const configured = optionValue
+    ?? parseInt(envValue ?? String(DEFAULTS.purgeSweepIntervalMs / 1000), 10) * 1000
+
+  if (!Number.isFinite(configured) || configured < 0) {
+    log.error(`invalid purge sweep interval (${envValue}), falling back to ${DEFAULTS.purgeSweepIntervalMs}ms`)
+    return DEFAULTS.purgeSweepIntervalMs
+  }
+
+  return configured
+}
 
 export async function startBoardManager(options: BoardManagerOptions): Promise<BoardManagerResult> {
   const {
@@ -176,6 +199,27 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
     saveState(statePath, state)
   }
 
+  /**
+   * Purge every archived thread whose retention window has elapsed.
+   *
+   * Kept separate from `handleUpdate` because this is the one piece of work that
+   * is driven by the clock rather than by board activity — see the purge sweep
+   * below.
+   */
+  async function purgeExpiredArchivedThreads(signer: Signer): Promise<void> {
+    const now = Math.floor(Date.now() / 1000)
+    for (const [cid, info] of Object.entries(state.archivedThreads)) {
+      if (stopped) return
+      if (now - info.archivedTimestamp > archivePurgeSeconds) {
+        try {
+          await purgeThread(cid, signer, moderationReasons.purgeArchived)
+        } catch (err) {
+          log.error(`failed to purge thread ${cid}: ${err}`)
+        }
+      }
+    }
+  }
+
   async function findDeletedReplies(thread: ThreadComment): Promise<string[]> {
     const deletedCids: string[] = []
     const visited = new Set<string>()
@@ -314,16 +358,7 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
     }
 
     // Purge archived threads past archive_purge_seconds
-    const now = Math.floor(Date.now() / 1000)
-    for (const [cid, info] of Object.entries(state.archivedThreads)) {
-      if (now - info.archivedTimestamp > archivePurgeSeconds) {
-        try {
-          await purgeThread(cid, signer, moderationReasons.purgeArchived)
-        } catch (err) {
-          log.error(`failed to purge thread ${cid}: ${err}`)
-        }
-      }
-    }
+    await purgeExpiredArchivedThreads(signer)
 
     // Purge author-deleted threads and replies
     for (const thread of threads) {
@@ -361,6 +396,18 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
   let updatePendingRerun = false
   let lastUpdateAt = Date.now()
 
+  /**
+   * Serializes the update handler against the purge sweep. Both publish
+   * moderations and mutate `state.archivedThreads`, so letting them overlap
+   * could publish two purges for the same thread.
+   */
+  let workLock: Promise<unknown> = Promise.resolve()
+  function withWorkLock<T>(task: () => Promise<T>): Promise<T> {
+    const result = workLock.then(task, task)
+    workLock = result.catch(() => undefined)
+    return result
+  }
+
   const updateHandler = () => {
     lastUpdateAt = Date.now()
     if (updateRunning) {
@@ -371,16 +418,18 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
 
     const run = async (): Promise<void> => {
       try {
-        // Detect address change (e.g., hash → named address via bitsocial-cli)
-        if (community.address && community.address !== communityAddress) {
-          try {
-            await migrateAddress(community.address)
-          } catch (err) {
-            log.error(`address migration failed: ${err}`)
+        await withWorkLock(async () => {
+          // Detect address change (e.g., hash → named address via bitsocial-cli)
+          if (community.address && community.address !== communityAddress) {
+            try {
+              await migrateAddress(community.address)
+            } catch (err) {
+              log.error(`address migration failed: ${err}`)
+            }
           }
-        }
-        const signer = await getOrCreateSigner()
-        await handleUpdate(community, signer)
+          const signer = await getOrCreateSigner()
+          await handleUpdate(community, signer)
+        })
       } catch (err) {
         log.error(`update handler error: ${err}`)
       }
@@ -397,6 +446,30 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
   community.on('update', updateHandler)
   await community.update()
   log(`board manager running for ${communityAddress}`)
+
+  // Archiving reacts to board activity, but purging is purely time-based: once a
+  // thread has been archived, nothing else needs to happen for its retention to
+  // expire. A quiet board emits no `update` events, so without this sweep an
+  // expired thread would linger in the archive until unrelated activity arrived.
+  const purgeSweepIntervalMs = resolvePurgeSweepIntervalMs(
+    options.purgeSweepIntervalMs,
+    process.env['PURGE_SWEEP_INTERVAL_SECONDS'],
+  )
+
+  let purgeSweepInterval: NodeJS.Timeout | undefined
+
+  if (purgeSweepIntervalMs > 0) {
+    purgeSweepInterval = setInterval(() => {
+      if (stopped) return
+      void withWorkLock(async () => {
+        if (stopped) return
+        const sweepSigner = await getOrCreateSigner()
+        await purgeExpiredArchivedThreads(sweepSigner)
+      }).catch((err) => {
+        log.error(`purge sweep error: ${err}`)
+      })
+    }, purgeSweepIntervalMs)
+  }
 
   const heartbeatPath = options.heartbeatPath
   const heartbeatIntervalMs = options.heartbeatIntervalMs
@@ -433,6 +506,7 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
   return {
     async stop() {
       stopped = true
+      if (purgeSweepInterval) clearInterval(purgeSweepInterval)
       if (heartbeatInterval) clearInterval(heartbeatInterval)
       community.removeListener('update', updateHandler)
       saveState(statePath, state)

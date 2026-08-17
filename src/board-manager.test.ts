@@ -7,7 +7,7 @@ import lockfile from '@pkcprotocol/proper-lock-file'
 import Logger from '@pkcprotocol/pkc-logger'
 import { loadState, saveState } from './state.js'
 import type { BoardManagerState, PKCInstance, Page, ThreadComment } from './types.js'
-import { startBoardManager } from './board-manager.js'
+import { startBoardManager, resolvePurgeSweepIntervalMs } from './board-manager.js'
 
 interface DebugModule {
   log: (...args: unknown[]) => void
@@ -270,6 +270,138 @@ describe('board manager logic', () => {
       const toPurge = Object.entries(state.archivedThreads)
         .filter(([_, info]) => now - info.archivedTimestamp > archivePurgeSeconds)
       expect(toPurge).toHaveLength(0)
+    })
+  })
+
+  // Purging is time-based, but archiving is driven by community `update` events.
+  // A board that goes quiet emits no updates, so a purge that is only ever
+  // reached from the update handler never runs. That is what made the e2e test
+  // "purges archived thread after archivePurgeSeconds" flaky: it passed only when
+  // an unrelated update happened to arrive inside the wait window.
+  describe('purge sweep without update events', () => {
+    /** A board with two threads, one already archived, well within capacity. */
+    function createQuietBoard() {
+      const { instance, publishedModerations } = createMockPKC()
+      const getPage = vi.fn().mockResolvedValue({
+        comments: [mockThread('QmArchived', { archived: true }), mockThread('QmLive')],
+        nextCid: undefined,
+      } as Page)
+      const mockSub = createMockCommunity({ pageCids: { active: 'QmPage1' }, pages: {}, getPage })
+      vi.mocked(instance.getCommunity).mockResolvedValue(
+        mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>,
+      )
+      return { instance, publishedModerations, mockSub }
+    }
+
+    function seedArchivedThread(archivedSecondsAgo: number): void {
+      const state: BoardManagerState = {
+        signers: {},
+        archivedThreads: {
+          QmArchived: { archivedTimestamp: Math.floor(Date.now() / 1000) - archivedSecondsAgo },
+        },
+      }
+      saveState(join(boardDir, 'state.json'), state)
+    }
+
+    it('purges an expired archived thread with no further update events', async () => {
+      const { publishedModerations } = createQuietBoard()
+      // Not yet expired at startup, so the startup update cannot be what purges it.
+      seedArchivedThread(0)
+
+      const boardManager = await startBoardManager({
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
+        boardDir,
+        archivePurgeSeconds: 1,
+        purgeSweepIntervalMs: 50,
+      })
+
+      expect(publishedModerations).toHaveLength(0)
+
+      // No update event is ever fired from here on — only the sweep can purge.
+      await vi.waitFor(
+        () => {
+          expect(publishedModerations).toHaveLength(1)
+        },
+        { timeout: 5_000 },
+      )
+
+      expect(publishedModerations[0]?.commentCid).toBe('QmArchived')
+      expect(publishedModerations[0]?.commentModeration.purged).toBe(true)
+      expect(loadState(join(boardDir, 'state.json')).archivedThreads['QmArchived']).toBeUndefined()
+
+      await boardManager.stop()
+    })
+
+    it('leaves archived threads alone until their retention expires', async () => {
+      const { publishedModerations } = createQuietBoard()
+      seedArchivedThread(0)
+
+      const boardManager = await startBoardManager({
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
+        boardDir,
+        archivePurgeSeconds: 3_600,
+        purgeSweepIntervalMs: 50,
+      })
+
+      await new Promise((resolve) => setTimeout(resolve, 300))
+
+      expect(publishedModerations).toHaveLength(0)
+      expect(loadState(join(boardDir, 'state.json')).archivedThreads['QmArchived']).toBeDefined()
+
+      await boardManager.stop()
+    })
+
+    it('stops sweeping once the board manager is stopped', async () => {
+      const { publishedModerations } = createQuietBoard()
+      // Already expired, so any sweep tick that runs would purge it.
+      seedArchivedThread(60)
+
+      const boardManager = await startBoardManager({
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
+        boardDir,
+        archivePurgeSeconds: 1,
+        purgeSweepIntervalMs: 10_000,
+      })
+      await boardManager.stop()
+
+      const countAtStop = publishedModerations.length
+      await new Promise((resolve) => setTimeout(resolve, 200))
+
+      expect(publishedModerations).toHaveLength(countAtStop)
+    })
+  })
+
+  describe('resolvePurgeSweepIntervalMs', () => {
+    it('prefers an explicit option over the environment', () => {
+      expect(resolvePurgeSweepIntervalMs(1_500, '60')).toBe(1_500)
+    })
+
+    it('reads seconds from the environment', () => {
+      expect(resolvePurgeSweepIntervalMs(undefined, '5')).toBe(5_000)
+    })
+
+    it('defaults to 60s when unset', () => {
+      expect(resolvePurgeSweepIntervalMs(undefined, undefined)).toBe(60_000)
+    })
+
+    it('treats 0 as a deliberate disable', () => {
+      expect(resolvePurgeSweepIntervalMs(undefined, '0')).toBe(0)
+      expect(resolvePurgeSweepIntervalMs(0, undefined)).toBe(0)
+    })
+
+    // A malformed value parses to NaN. Left unguarded that disables the sweep
+    // silently, which would quietly reintroduce the "expired threads never get
+    // purged on a quiet board" bug.
+    it('falls back to the default rather than silently disabling on a malformed value', () => {
+      expect(resolvePurgeSweepIntervalMs(undefined, 'not-a-number')).toBe(60_000)
+      expect(resolvePurgeSweepIntervalMs(undefined, '')).toBe(60_000)
+    })
+
+    it('rejects negative intervals', () => {
+      expect(resolvePurgeSweepIntervalMs(undefined, '-5')).toBe(60_000)
     })
   })
 
