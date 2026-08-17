@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.25](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.24...v0.2.25) (2026-08-17)
+
+### Bug Fixes
+
+* **board-manager:** address review findings on the purge sweep ([04a5915](https://github.com/bitsocialnet/5chan-board-manager/commit/04a59154fb111a9e28b93f23b51a397f8cc0a483))
+* **board-manager:** purge expired threads on a timer, not only on updates ([9e1d97b](https://github.com/bitsocialnet/5chan-board-manager/commit/9e1d97b477449109f61065cb3184390a7fd259d5))
+
 ## [0.2.24](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.23...v0.2.24) (2026-08-17)
 
 ### Bug Fixes
