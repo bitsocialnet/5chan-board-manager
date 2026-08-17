@@ -38,9 +38,11 @@ interface MockModerationRecord {
 }
 
 // Helper to create a mock PKC instance (RPC-only, no dataPath)
-function createMockPKC() {
+function createMockPKC(publishDelayMs = 0) {
   const mockSigner = { address: 'mock-address-123', privateKey: 'mock-pk-123' }
   const publishedModerations: MockModerationRecord[] = []
+  /** Recorded when publish() is entered, before any delay — i.e. work in flight. */
+  const publishStarts: MockModerationRecord[] = []
 
   const instance = {
     createSigner: vi.fn().mockResolvedValue({ ...mockSigner }),
@@ -49,6 +51,11 @@ function createMockPKC() {
     createCommentModeration: vi.fn().mockImplementation((opts: MockModerationRecord) => ({
       ...opts,
       publish: vi.fn().mockImplementation(async () => {
+        // Lets tests hold a moderation in flight, e.g. across a stop().
+        publishStarts.push(opts)
+        if (publishDelayMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, publishDelayMs))
+        }
         publishedModerations.push(opts)
       }),
     })),
@@ -61,6 +68,7 @@ function createMockPKC() {
     instance,
     mockSigner,
     publishedModerations,
+    publishStarts,
   }
 }
 
@@ -280,8 +288,8 @@ describe('board manager logic', () => {
   // an unrelated update happened to arrive inside the wait window.
   describe('purge sweep without update events', () => {
     /** A board with two threads, one already archived, well within capacity. */
-    function createQuietBoard() {
-      const { instance, publishedModerations } = createMockPKC()
+    function createQuietBoard(publishDelayMs = 0) {
+      const { instance, publishedModerations, publishStarts } = createMockPKC(publishDelayMs)
       const getPage = vi.fn().mockResolvedValue({
         comments: [mockThread('QmArchived', { archived: true }), mockThread('QmLive')],
         nextCid: undefined,
@@ -290,7 +298,7 @@ describe('board manager logic', () => {
       vi.mocked(instance.getCommunity).mockResolvedValue(
         mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>,
       )
-      return { instance, publishedModerations, mockSub }
+      return { instance, publishedModerations, publishStarts, mockSub }
     }
 
     function seedArchivedThread(archivedSecondsAgo: number): void {
@@ -355,22 +363,59 @@ describe('board manager logic', () => {
 
     it('stops sweeping once the board manager is stopped', async () => {
       const { publishedModerations } = createQuietBoard()
-      // Already expired, so any sweep tick that runs would purge it.
-      seedArchivedThread(60)
+      // Retention expires *after* stop() is called, so the thread is not purgeable
+      // at any point while the manager is running. A sweep that kept ticking after
+      // shutdown would purge it; a stopped one leaves it alone.
+      seedArchivedThread(0)
 
       const boardManager = await startBoardManager({
         communityAddress: 'board.bso',
         pkcRpcUrl: 'ws://localhost:9138',
         boardDir,
         archivePurgeSeconds: 1,
-        purgeSweepIntervalMs: 10_000,
+        purgeSweepIntervalMs: 50,
       })
+
+      // Nothing was due while it was running.
+      expect(publishedModerations).toHaveLength(0)
       await boardManager.stop()
 
-      const countAtStop = publishedModerations.length
-      await new Promise((resolve) => setTimeout(resolve, 200))
+      // Comfortably past the retention window and many sweep intervals. Retention
+      // is compared in whole seconds (`now - archivedAt > 1`), so this has to clear
+      // two full seconds before a still-running sweep would purge.
+      await new Promise((resolve) => setTimeout(resolve, 2_600))
 
-      expect(publishedModerations).toHaveLength(countAtStop)
+      expect(publishedModerations).toHaveLength(0)
+      expect(loadState(join(boardDir, 'state.json')).archivedThreads['QmArchived']).toBeDefined()
+    })
+
+    // stop() tears down the file lock and the PKC instance. Work already in flight
+    // must finish first, or it resumes against destroyed dependencies and writes
+    // state while holding no lock.
+    it('waits for in-flight moderation work before tearing down', async () => {
+      const { publishedModerations, publishStarts } = createQuietBoard(300)
+      seedArchivedThread(60) // expired, so the startup update begins purging it
+
+      const boardManager = await startBoardManager({
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
+        boardDir,
+        archivePurgeSeconds: 1,
+        purgeSweepIntervalMs: 0, // isolate the update path
+      })
+
+      // Stop only once a purge is genuinely mid-publish, otherwise the `stopped`
+      // flag would short-circuit it before it ever started and prove nothing.
+      await vi.waitFor(() => {
+        expect(publishStarts).toHaveLength(1)
+      })
+      expect(publishedModerations).toHaveLength(0)
+
+      await boardManager.stop()
+
+      // If stop() returned while the purge was still inside publish(), this would
+      // still be 0 — the publish would land afterwards, against a destroyed PKC.
+      expect(publishedModerations).toHaveLength(1)
     })
   })
 
@@ -402,6 +447,23 @@ describe('board manager logic', () => {
 
     it('rejects negative intervals', () => {
       expect(resolvePurgeSweepIntervalMs(undefined, '-5')).toBe(60_000)
+    })
+
+    // parseInt stops at the first non-digit, so "0oops" would resolve to 0 and
+    // silently disable the sweep — the exact failure this fallback exists to catch.
+    it('rejects partially numeric values instead of truncating them', () => {
+      expect(resolvePurgeSweepIntervalMs(undefined, '0oops')).toBe(60_000)
+      expect(resolvePurgeSweepIntervalMs(undefined, '60oops')).toBe(60_000)
+      expect(resolvePurgeSweepIntervalMs(undefined, '1.5')).toBe(60_000)
+    })
+
+    it('tolerates surrounding whitespace', () => {
+      expect(resolvePurgeSweepIntervalMs(undefined, ' 30 ')).toBe(30_000)
+    })
+
+    it('rejects a non-integer or negative option value', () => {
+      expect(resolvePurgeSweepIntervalMs(Number.NaN, undefined)).toBe(60_000)
+      expect(resolvePurgeSweepIntervalMs(-1, undefined)).toBe(60_000)
     })
   })
 

@@ -850,7 +850,7 @@ Reference: `pkc-js/src/community/community-client-manager.ts`, `pkc-js/src/runti
    g. For each author-deleted comment/reply:
       - createCommentModeration({ purged: true }) and publish
 
-5. Every PURGE_SWEEP_INTERVAL_SECONDS, independent of update events:
+8. Every PURGE_SWEEP_INTERVAL_SECONDS, independent of update events (skipped when set to 0):
    - Run step (f) again, so time-based purging still happens on a quiet board
 ```
 

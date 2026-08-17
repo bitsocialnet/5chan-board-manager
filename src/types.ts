@@ -41,7 +41,8 @@ export interface BoardManagerOptions {
    * Archiving is driven by community `update` events, but purging is time-based:
    * a quiet board emits no updates, so without this sweep an expired thread would
    * sit in the archive until unrelated activity happened to wake the manager.
-   * Defaults from `PURGE_SWEEP_INTERVAL_SECONDS` env or 60_000.
+   * Defaults from `PURGE_SWEEP_INTERVAL_SECONDS` env or 60_000. Set to `0` to
+   * disable the sweep entirely, leaving purges to happen only on update events.
    */
   purgeSweepIntervalMs?: number
   /** Path to a shared heartbeat file the board ticks `mtime` on. Disabled if undefined. */

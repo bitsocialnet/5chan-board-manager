@@ -24,23 +24,42 @@ const DEFAULTS = {
 /**
  * Resolve the purge sweep cadence from an explicit option or the environment.
  *
- * `0` disables the sweep deliberately. A malformed env value parses to `NaN`,
- * which would otherwise disable purging silently, so it falls back to the
- * default instead.
+ * `0` disables the sweep deliberately. Anything malformed falls back to the
+ * default instead, because the dangerous failure mode here is a bad value
+ * silently resolving to "disabled" and quietly restoring the bug this sweep
+ * exists to fix.
  */
 export function resolvePurgeSweepIntervalMs(
   optionValue: number | undefined,
   envValue: string | undefined,
 ): number {
-  const configured = optionValue
-    ?? parseInt(envValue ?? String(DEFAULTS.purgeSweepIntervalMs / 1000), 10) * 1000
+  if (optionValue !== undefined) {
+    if (!Number.isInteger(optionValue) || optionValue < 0) {
+      log.error(`invalid purge sweep interval ${optionValue}, falling back to ${DEFAULTS.purgeSweepIntervalMs}ms`)
+      return DEFAULTS.purgeSweepIntervalMs
+    }
+    return optionValue
+  }
 
-  if (!Number.isFinite(configured) || configured < 0) {
-    log.error(`invalid purge sweep interval (${envValue}), falling back to ${DEFAULTS.purgeSweepIntervalMs}ms`)
+  if (envValue === undefined) {
     return DEFAULTS.purgeSweepIntervalMs
   }
 
-  return configured
+  // Deliberately not parseInt: it stops at the first non-digit, so "0oops" would
+  // resolve to 0 and silently disable the sweep. Require the whole value to be a
+  // non-negative integer.
+  const trimmed = envValue.trim()
+  const seconds = /^\d+$/.test(trimmed) ? Number(trimmed) : Number.NaN
+  const intervalMs = seconds * 1000
+
+  if (!Number.isFinite(intervalMs)) {
+    log.error(
+      `invalid PURGE_SWEEP_INTERVAL_SECONDS ${JSON.stringify(envValue)}, falling back to ${DEFAULTS.purgeSweepIntervalMs}ms`,
+    )
+    return DEFAULTS.purgeSweepIntervalMs
+  }
+
+  return intervalMs
 }
 
 export async function startBoardManager(options: BoardManagerOptions): Promise<BoardManagerResult> {
@@ -457,17 +476,30 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
   )
 
   let purgeSweepInterval: NodeJS.Timeout | undefined
+  // A sweep with many expired threads publishes moderations one at a time and can
+  // outlast the interval. Without this guard every tick would queue another task
+  // behind the running one, and update processing would wait behind the backlog.
+  //
+  // Deliberately untested: queued sweeps are serialized so they never overlap, and
+  // after stop() they short-circuit before doing anything observable — every test
+  // written for this passed with the guard removed, so none is kept.
+  let purgeSweepPending = false
 
   if (purgeSweepIntervalMs > 0) {
     purgeSweepInterval = setInterval(() => {
-      if (stopped) return
+      if (stopped || purgeSweepPending) return
+      purgeSweepPending = true
       void withWorkLock(async () => {
         if (stopped) return
         const sweepSigner = await getOrCreateSigner()
         await purgeExpiredArchivedThreads(sweepSigner)
-      }).catch((err) => {
-        log.error(`purge sweep error: ${err}`)
       })
+        .catch((err) => {
+          log.error(`purge sweep error: ${err}`)
+        })
+        .finally(() => {
+          purgeSweepPending = false
+        })
     }, purgeSweepIntervalMs)
   }
 
@@ -509,6 +541,12 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
       if (purgeSweepInterval) clearInterval(purgeSweepInterval)
       if (heartbeatInterval) clearInterval(heartbeatInterval)
       community.removeListener('update', updateHandler)
+      // Clearing the timers only stops future ticks. An update or sweep already
+      // inside publish() would otherwise resume after the lock is released and
+      // the PKC instance is destroyed, then write state holding no lock. Nothing
+      // can queue new work at this point: the timer is cleared, the listener is
+      // removed, and both paths bail on `stopped`.
+      await workLock
       saveState(statePath, state)
       await fileLock.release()
       await community.stop?.()
