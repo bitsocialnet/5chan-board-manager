@@ -101,6 +101,9 @@ docker compose up -d
 # or always use --skip-apply-defaults):
 docker compose exec bitsocial bitsocial challenge install @bitsocial/spam-blocker-challenge
 
+# Optional: install this before enabling the wordfilter preset example
+docker compose exec bitsocial bitsocial challenge install @bitsocial/wordfilter-challenge@0.2.0
+
 # Now add boards via 5chan board add (see Config Directory Layout above)
 ```
 
@@ -123,6 +126,9 @@ docker compose up -d
 
 # Install the spam-blocker challenge referenced by the default preset
 docker compose exec bitsocial bitsocial challenge install @bitsocial/spam-blocker-challenge
+
+# Optional: install this before enabling the wordfilter preset example
+docker compose exec bitsocial bitsocial challenge install @bitsocial/wordfilter-challenge@0.2.0
 
 # Create a community (copy the created address from output)
 docker compose exec bitsocial bitsocial community create \
@@ -161,6 +167,13 @@ bitsocial challenge install @bitsocial/spam-blocker-challenge
 ```
 
 If you do not want this dependency, remove both `@bitsocial/spam-blocker-challenge` entries from your preset (they are marked optional in the file) or use `--skip-apply-defaults`.
+
+The bundled preset also contains a disabled wordfilter example. If you enable
+it, install the challenge on the same bitsocial-cli instance first:
+
+```bash
+bitsocial challenge install @bitsocial/wordfilter-challenge@0.2.0
+```
 
 See [`docker-compose.standalone.example.yml`](docker-compose.standalone.example.yml) for the configuration.
 
@@ -235,6 +248,59 @@ Bundled preset JSONC defaults:
 `boardSettings` is merged into `community.edit()` with "missing only" semantics (only absent values are applied). `boardManagerSettings` is used as default values for `board add` config fields, and explicit CLI flags override these defaults.
 
 The bundled preset file is `src/presets/community-defaults.jsonc`.
+
+### Optional wordfilters
+
+Wordfilters replace configured text in a publishing client before the
+publication is signed. The community node then rejects any publication that
+still contains a filtered source word. Consequently, enable wordfilters only
+after the clients used by the board support the `wordfilter/v1` contract. An
+older client cannot publish the unfiltered text; it receives the configured
+challenge error instead.
+
+The bundled preset contains a commented example that replaces `plebbit` with
+`bitcoin` in post and reply content, comment-edit content, and post titles. To
+enable it for a new board:
+
+1. Install `@bitsocial/wordfilter-challenge@0.2.0` on the bitsocial-cli instance
+   that hosts the community.
+2. Run `5chan board add ADDRESS --interactive-apply-defaults`.
+3. Choose **Modify**, uncomment the wordfilter challenge object, review the
+   rule, then save the preset.
+
+The active challenge object has this shape when configuring a custom preset or
+editing an existing community's `settings.challenges` array:
+
+```json
+{
+  "name": "@bitsocial/wordfilter-challenge",
+  "description": "Replaces configured words before publications are signed.",
+  "options": {
+    "wordfilter/v1/rules": "[{\"src\":\"plebbit\",\"dst\":\"bitcoin\"}]",
+    "wordfilter/v1/fieldNames": "[\"content\",\"title\"]",
+    "error": "This board replaces certain words. Please retry after refreshing the board."
+  },
+  "publicOptions": [
+    "wordfilter/v1/rules",
+    "wordfilter/v1/fieldNames",
+    "error"
+  ]
+}
+```
+
+The two contract options must remain in `publicOptions`: publishing clients
+need them to produce text the community will accept. Rules are literal and
+case-insensitive, not regular expressions. This example matches `plebbit`,
+`Plebbit`, and `PLEBBIT`, but not `p l e b b i t` or Unicode lookalikes.
+
+Invalid rules within one wordfilter challenge are rejected when the community
+configuration is saved. Each challenge allows at most 64 rules; source and
+destination strings are limited to 128 characters; and replacements that could
+loop or reintroduce another source in that challenge are rejected. Conflicts
+between separate wordfilter challenges cannot be validated in isolation; they
+surface during client application or as a publication rejection. See the
+[`@bitsocial/wordfilter-challenge` contract](https://github.com/bitsocialnet/wordfilter-challenge#the-wordfilterv1-contract)
+for the complete validation and client behavior.
 
 ## Commands
 
