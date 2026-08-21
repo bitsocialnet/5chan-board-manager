@@ -293,10 +293,12 @@ need them to produce text the community will accept. Rules are literal and
 case-insensitive, not regular expressions. This example matches `plebbit`,
 `Plebbit`, and `PLEBBIT`, but not `p l e b b i t` or Unicode lookalikes.
 
-Invalid rules are rejected when the community configuration is saved. The
-challenge allows at most 64 rules; source and destination strings are limited
-to 128 characters; and replacements that could loop or reintroduce another
-filtered source are rejected. See the
+Invalid rules within one wordfilter challenge are rejected when the community
+configuration is saved. Each challenge allows at most 64 rules; source and
+destination strings are limited to 128 characters; and replacements that could
+loop or reintroduce another source in that challenge are rejected. Conflicts
+between separate wordfilter challenges cannot be validated in isolation; they
+surface during client application or as a publication rejection. See the
 [`@bitsocial/wordfilter-challenge` contract](https://github.com/bitsocialnet/wordfilter-challenge#the-wordfilterv1-contract)
 for the complete validation and client behavior.
 
