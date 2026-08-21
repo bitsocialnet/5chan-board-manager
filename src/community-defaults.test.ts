@@ -98,6 +98,18 @@ describe('community defaults preset loading', () => {
     expect(preset.boardSettings.settings?.fetchThumbnailUrls).toBe(true)
   })
 
+  it('ships an opt-in wordfilter example without enabling it', async () => {
+    const rawPreset = loadCommunityDefaultsPresetRaw()
+    const preset = await loadCommunityDefaultsPreset()
+
+    expect(rawPreset).toContain('"name": "@bitsocial/wordfilter-challenge"')
+    expect(rawPreset).toContain('"wordfilter/v1/rules"')
+    expect(rawPreset).toContain('"wordfilter/v1/fieldNames"')
+    expect(preset.boardSettings.settings?.challenges).not.toContainEqual(
+      expect.objectContaining({ name: '@bitsocial/wordfilter-challenge' }),
+    )
+  })
+
   it('loads a valid preset jsonc file with comments', async () => {
     const dir = tmpDir()
     const presetPath = join(dir, 'preset.jsonc')
@@ -200,7 +212,7 @@ describe('community defaults preset loading', () => {
   })
 })
 
-// Regression coverage for the pkc-js upgrade (0.0.22 -> 0.0.82). The main
+// Regression coverage for the pkc-js upgrades (0.0.22 -> 0.0.82 -> 0.0.85). The main
 // entrypoint now resolves into `dist/bundled/`, which has no `schema/`
 // directory, so deriving the schema-util path from it silently produced a
 // non-existent path. Every other test in this file stubs the parser out, so
@@ -220,6 +232,33 @@ describe('pkc-js schema-util resolution', () => {
     const parse = await getParseCommunityEditOptions()
     expect(parse({ title: 'a board' })).toMatchObject({ title: 'a board' })
     expect(() => parse({ features: { pseudonymityMode: 'nope' } } as never)).toThrow()
+  })
+
+  it('accepts public wordfilter options in a custom preset', async () => {
+    const parse = await getParseCommunityEditOptions()
+    const rules = '[{"src":"plebbit","dst":"bitcoin"}]'
+    const fieldNames = '["content","title"]'
+    const parsed = parse({
+      settings: {
+        challenges: [{
+          name: '@bitsocial/wordfilter-challenge',
+          options: {
+            'wordfilter/v1/rules': rules,
+            'wordfilter/v1/fieldNames': fieldNames,
+          },
+          publicOptions: ['wordfilter/v1/rules', 'wordfilter/v1/fieldNames'],
+        }],
+      },
+    })
+
+    expect(parsed.settings?.challenges?.[0]).toMatchObject({
+      name: '@bitsocial/wordfilter-challenge',
+      options: {
+        'wordfilter/v1/rules': rules,
+        'wordfilter/v1/fieldNames': fieldNames,
+      },
+      publicOptions: ['wordfilter/v1/rules', 'wordfilter/v1/fieldNames'],
+    })
   })
 
   it('validates the shipped community-defaults preset against the real pkc-js schema', async () => {

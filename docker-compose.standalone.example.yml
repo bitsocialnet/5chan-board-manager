@@ -13,6 +13,10 @@
 # Otherwise remove both spam-blocker entries from your preset (they are marked
 # optional in the file) or pass --skip-apply-defaults.
 #
+# The preset also contains a disabled wordfilter example. Before enabling it,
+# install the challenge on the external bitsocial-cli instance:
+#   bitsocial challenge install @bitsocial/wordfilter-challenge@0.2.0
+#
 # View logs:
 #   docker compose logs -f 5chan
 
