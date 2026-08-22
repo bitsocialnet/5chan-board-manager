@@ -2,6 +2,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import stripJsonComments from 'strip-json-comments'
+import {
+  WORDFILTER_V1_FIELD_NAMES_OPTION,
+  WORDFILTER_V1_RULES_OPTION,
+  applyWordfilters,
+  validateChallengeSettings,
+  type WordfilterRule,
+} from '@bitsocial/wordfilter-challenge'
 
 vi.mock('./pkc-rpc.js', () => ({
   connectToPkcRpc: vi.fn(),
@@ -105,34 +113,50 @@ describe('community defaults preset loading', () => {
     expect(rawPreset).toContain('"name": "@bitsocial/wordfilter-challenge"')
     expect(rawPreset).toContain('"wordfilter/v1/rules"')
     expect(rawPreset).toContain('"wordfilter/v1/fieldNames"')
-    // The example uses 4chan's classic filters so posters recognise them on
-    // sight, and it has to satisfy the wordfilter-challenge validation rules
-    // (non-empty src, src !== dst, unique src, no dst containing any src).
-    const rulesLine = rawPreset.split('\n').find((line) => line.includes('"wordfilter/v1/rules"'))
-    expect(rulesLine).toBeDefined()
-    const rulesJson = JSON.parse(`{${rulesLine!.replace(/^\s*\/\/\s*/, '').replace(/,\s*$/, '')}}`) as Record<string, string>
-    const rules = JSON.parse(rulesJson['wordfilter/v1/rules']) as Array<{ src: string; dst: string }>
+    // Extract the commented-out challenge object, uncomment it and run it
+    // through the real @bitsocial/wordfilter-challenge validation, which is
+    // what the community node runs when the configuration is saved.
+    const lines = rawPreset.split('\n')
+    const nameIndex = lines.findIndex((line) => line.includes('"name": "@bitsocial/wordfilter-challenge"'))
+    expect(nameIndex).toBeGreaterThan(0)
+    const isCommentedOut = (line: string) => /^\s*\/\//.test(line)
+    let blockStart = nameIndex
+    // The object's own braces sit one space after `//`; nested ones are indented further.
+    while (blockStart > 0 && !/^\s*\/\/ \{\s*$/.test(lines[blockStart])) blockStart--
+    let blockEnd = nameIndex
+    while (blockEnd < lines.length && !/^\s*\/\/ \},?\s*$/.test(lines[blockEnd])) blockEnd++
+    const block = lines.slice(blockStart, blockEnd + 1)
+    expect(block.every(isCommentedOut)).toBe(true)
+    const uncommented = block.map((line) => line.replace(/^\s*\/\/ ?/, '')).join('\n').replace(/,\s*$/, '')
+    const challengeSettings = JSON.parse(stripJsonComments(uncommented, { trailingCommas: true })) as {
+      name: string
+      options: Record<string, string>
+      publicOptions: string[]
+    }
+    expect(() => validateChallengeSettings({ challengeSettings })).not.toThrow()
+
+    // The example uses 4chan's classic filters so posters recognise them on sight.
+    const rules = JSON.parse(challengeSettings.options[WORDFILTER_V1_RULES_OPTION]) as WordfilterRule[]
     expect(rules).toEqual([
       { src: 'soy', dst: 'onions' },
       { src: 'tbh', dst: 'desu' },
       { src: 'smh', dst: 'baka' },
     ])
-    const sources = rules.map((rule) => rule.src.toLowerCase())
-    expect(new Set(sources).size).toBe(sources.length)
-    for (const rule of rules) {
-      expect(rule.src).not.toBe('')
-      expect(rule.src.toLowerCase()).not.toBe(rule.dst.toLowerCase())
-      for (const src of sources) expect(rule.dst.toLowerCase()).not.toContain(src)
-    }
+    expect(applyWordfilters('Soybean tbh, SMH', rules)).toBe('onionsbean desu, baka')
+
     // wordfilter-challenge 0.3.0 requires publication-prefixed field paths;
     // a bare path such as "content" is rejected when the community is saved.
-    const fieldNamesLine = rawPreset.split('\n').find((line) => line.includes('"wordfilter/v1/fieldNames":'))
-    expect(fieldNamesLine).toBeDefined()
-    const fieldNamesJson = JSON.parse(`{${fieldNamesLine!.replace(/^\s*\/\/\s*/, '').replace(/,\s*$/, '')}}`) as Record<string, string>
-    const fieldNames = JSON.parse(fieldNamesJson['wordfilter/v1/fieldNames']) as string[]
+    const fieldNames = JSON.parse(challengeSettings.options[WORDFILTER_V1_FIELD_NAMES_OPTION]) as string[]
     expect(fieldNames).toEqual(['comment.content', 'comment.title', 'commentEdit.content'])
-    const publicationTypes = ['comment', 'vote', 'commentEdit', 'commentModeration', 'communityEdit']
-    for (const fieldName of fieldNames) expect(publicationTypes).toContain(fieldName.split('.')[0])
+    expect(() =>
+      validateChallengeSettings({
+        challengeSettings: {
+          ...challengeSettings,
+          options: { ...challengeSettings.options, [WORDFILTER_V1_FIELD_NAMES_OPTION]: '["content","title"]' },
+        },
+      }),
+    ).toThrow(/must start with a publication type/)
+    expect(challengeSettings.publicOptions).toEqual(expect.arrayContaining([WORDFILTER_V1_RULES_OPTION, WORDFILTER_V1_FIELD_NAMES_OPTION]))
     expect(rawPreset).toContain('wordfilter-challenge@0.3.0')
     expect(preset.boardSettings.settings?.challenges).not.toContainEqual(
       expect.objectContaining({ name: '@bitsocial/wordfilter-challenge' }),
