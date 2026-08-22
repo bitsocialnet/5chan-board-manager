@@ -7,7 +7,7 @@
 #   # (without it, `5chan board add --apply-defaults` is rejected by the RPC server):
 #   docker compose exec bitsocial bitsocial challenge install @bitsocial/spam-blocker-challenge
 #   # Optional: install this before enabling the commented wordfilter preset example:
-#   docker compose exec bitsocial bitsocial challenge install @bitsocial/wordfilter-challenge@0.2.0
+#   docker compose exec bitsocial bitsocial challenge install @bitsocial/wordfilter-challenge@0.3.0
 #   # Now add boards via 5chan board add (see README.md)
 #
 # View logs:

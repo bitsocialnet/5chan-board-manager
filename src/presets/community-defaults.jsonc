@@ -108,10 +108,7 @@
         // Optional wordfilter. This stays commented out so upgrading the board
         // manager never changes a board's published text policy automatically.
         // Before enabling it, install the challenge in bitsocial-cli:
-        //   bitsocial challenge install @bitsocial/wordfilter-challenge@0.2.0
-        // Stay on 0.2.0 for now: 0.3.0 changed wordfilter/v1/fieldNames to
-        // publication-prefixed paths (comment.content) that current clients
-        // (bitsocial-react-hooks 0.1.39) do not understand yet.
+        //   bitsocial challenge install @bitsocial/wordfilter-challenge@0.3.0
         // Also make sure every intended publishing client supports the
         // wordfilter/v1 contract; older clients will be rejected rather than
         // publishing an unfiltered word.
@@ -125,7 +122,9 @@
         //     // These are 4chan's classic filters (soy -> onions, tbh -> desu,
         //     // smh -> baka), so posters recognise the replacements on sight.
         //     "wordfilter/v1/rules": "[{\"src\":\"soy\",\"dst\":\"onions\"},{\"src\":\"tbh\",\"dst\":\"desu\"},{\"src\":\"smh\",\"dst\":\"baka\"}]",
-        //     "wordfilter/v1/fieldNames": "[\"content\",\"title\"]",
+        //     // Paths are prefixed with the publication type (wordfilter-challenge
+        //     // 0.3.0 contract): post/reply content and titles, plus edited content.
+        //     "wordfilter/v1/fieldNames": "[\"comment.content\",\"comment.title\",\"commentEdit.content\"]",
         //     "error": "This board replaces certain words. Please retry after refreshing the board.",
         //   },
         //   // Clients need both contract options to apply the same transformation.

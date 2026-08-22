@@ -102,7 +102,7 @@ docker compose up -d
 docker compose exec bitsocial bitsocial challenge install @bitsocial/spam-blocker-challenge
 
 # Optional: install this before enabling the wordfilter preset example
-docker compose exec bitsocial bitsocial challenge install @bitsocial/wordfilter-challenge@0.2.0
+docker compose exec bitsocial bitsocial challenge install @bitsocial/wordfilter-challenge@0.3.0
 
 # Now add boards via 5chan board add (see Config Directory Layout above)
 ```
@@ -128,7 +128,7 @@ docker compose up -d
 docker compose exec bitsocial bitsocial challenge install @bitsocial/spam-blocker-challenge
 
 # Optional: install this before enabling the wordfilter preset example
-docker compose exec bitsocial bitsocial challenge install @bitsocial/wordfilter-challenge@0.2.0
+docker compose exec bitsocial bitsocial challenge install @bitsocial/wordfilter-challenge@0.3.0
 
 # Create a community (copy the created address from output)
 docker compose exec bitsocial bitsocial community create \
@@ -172,7 +172,7 @@ The bundled preset also contains a disabled wordfilter example. If you enable
 it, install the challenge on the same bitsocial-cli instance first:
 
 ```bash
-bitsocial challenge install @bitsocial/wordfilter-challenge@0.2.0
+bitsocial challenge install @bitsocial/wordfilter-challenge@0.3.0
 ```
 
 See [`docker-compose.standalone.example.yml`](docker-compose.standalone.example.yml) for the configuration.
@@ -263,12 +263,8 @@ The bundled preset contains a commented example with 4chan's classic filters,
 reply content, comment-edit content, and post titles. To enable it for a new
 board:
 
-1. Install `@bitsocial/wordfilter-challenge@0.2.0` on the bitsocial-cli instance
-   that hosts the community. Stay on 0.2.0 for now: 0.3.0 changed
-   `wordfilter/v1/fieldNames` to publication-prefixed paths (`comment.content`)
-   that the current client library (`@bitsocial/bitsocial-react-hooks` 0.1.39)
-   does not understand yet, so a 0.3.0 community would reject every post
-   containing a filtered word.
+1. Install `@bitsocial/wordfilter-challenge@0.3.0` on the bitsocial-cli instance
+   that hosts the community.
 2. Run `5chan board add ADDRESS --interactive-apply-defaults`.
 3. Choose **Modify**, uncomment the wordfilter challenge object, review the
    rule, then save the preset.
@@ -282,7 +278,7 @@ editing an existing community's `settings.challenges` array:
   "description": "Replaces configured words before publications are signed.",
   "options": {
     "wordfilter/v1/rules": "[{\"src\":\"soy\",\"dst\":\"onions\"},{\"src\":\"tbh\",\"dst\":\"desu\"},{\"src\":\"smh\",\"dst\":\"baka\"}]",
-    "wordfilter/v1/fieldNames": "[\"content\",\"title\"]",
+    "wordfilter/v1/fieldNames": "[\"comment.content\",\"comment.title\",\"commentEdit.content\"]",
     "error": "This board replaces certain words. Please retry after refreshing the board."
   },
   "publicOptions": [
@@ -294,7 +290,12 @@ editing an existing community's `settings.challenges` array:
 ```
 
 The two contract options must remain in `publicOptions`: publishing clients
-need them to produce text the community will accept. Rules are literal and
+need them to produce text the community will accept. Field paths start with
+the publication type (`comment.content`, `commentEdit.content`,
+`vote.author.displayName`, ...), as required by wordfilter-challenge 0.3.0;
+bare paths such as `content` are rejected when the configuration is saved, and
+clients written against the 0.2.0 bare-path format do not apply prefixed paths,
+so their posts are rejected until they are updated. Rules are literal and
 case-insensitive substring matches, not regular expressions and not
 whole-word matches. This example matches `soy`, `Soy`, and `SOY`, and also
 the `soy` inside `soybean` (which becomes `onionsbean`, exactly as on 4chan),
