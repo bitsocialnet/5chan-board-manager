@@ -258,12 +258,17 @@ after the clients used by the board support the `wordfilter/v1` contract. An
 older client cannot publish the unfiltered text; it receives the configured
 challenge error instead.
 
-The bundled preset contains a commented example that replaces `plebbit` with
-`bitcoin` in post and reply content, comment-edit content, and post titles. To
-enable it for a new board:
+The bundled preset contains a commented example with 4chan's classic filters,
+`soy` -> `onions`, `tbh` -> `desu` and `smh` -> `baka`, applied to post and
+reply content, comment-edit content, and post titles. To enable it for a new
+board:
 
 1. Install `@bitsocial/wordfilter-challenge@0.2.0` on the bitsocial-cli instance
-   that hosts the community.
+   that hosts the community. Stay on 0.2.0 for now: 0.3.0 changed
+   `wordfilter/v1/fieldNames` to publication-prefixed paths (`comment.content`)
+   that the current client library (`@bitsocial/bitsocial-react-hooks` 0.1.39)
+   does not understand yet, so a 0.3.0 community would reject every post
+   containing a filtered word.
 2. Run `5chan board add ADDRESS --interactive-apply-defaults`.
 3. Choose **Modify**, uncomment the wordfilter challenge object, review the
    rule, then save the preset.
@@ -276,7 +281,7 @@ editing an existing community's `settings.challenges` array:
   "name": "@bitsocial/wordfilter-challenge",
   "description": "Replaces configured words before publications are signed.",
   "options": {
-    "wordfilter/v1/rules": "[{\"src\":\"plebbit\",\"dst\":\"bitcoin\"}]",
+    "wordfilter/v1/rules": "[{\"src\":\"soy\",\"dst\":\"onions\"},{\"src\":\"tbh\",\"dst\":\"desu\"},{\"src\":\"smh\",\"dst\":\"baka\"}]",
     "wordfilter/v1/fieldNames": "[\"content\",\"title\"]",
     "error": "This board replaces certain words. Please retry after refreshing the board."
   },
@@ -290,8 +295,10 @@ editing an existing community's `settings.challenges` array:
 
 The two contract options must remain in `publicOptions`: publishing clients
 need them to produce text the community will accept. Rules are literal and
-case-insensitive, not regular expressions. This example matches `plebbit`,
-`Plebbit`, and `PLEBBIT`, but not `p l e b b i t` or Unicode lookalikes.
+case-insensitive substring matches, not regular expressions and not
+whole-word matches. This example matches `soy`, `Soy`, and `SOY`, and also
+the `soy` inside `soybean` (which becomes `onionsbean`, exactly as on 4chan),
+but not `s o y` or Unicode lookalikes.
 
 Invalid rules within one wordfilter challenge are rejected when the community
 configuration is saved. Each challenge allows at most 64 rules; source and
