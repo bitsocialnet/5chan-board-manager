@@ -49,7 +49,7 @@
   "dependencies": {
     "@oclif/core": "4.8.0",
     "@oclif/plugin-help": "6.2.37",
-    "@pkcprotocol/pkc-js": "0.0.85",
+    "@pkcprotocol/pkc-js": "0.0.86",
     "@pkcprotocol/pkc-logger": "0.1.0",
     "@pkcprotocol/proper-lock-file": "4.2.1",
     "chokidar": "5.0.0",

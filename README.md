@@ -102,7 +102,7 @@ docker compose up -d
 docker compose exec bitsocial bitsocial challenge install @bitsocial/spam-blocker-challenge
 
 # Optional: install this before enabling the wordfilter preset example
-docker compose exec bitsocial bitsocial challenge install @bitsocial/wordfilter-challenge@0.2.0
+docker compose exec bitsocial bitsocial challenge install @bitsocial/wordfilter-challenge@0.3.0
 
 # Now add boards via 5chan board add (see Config Directory Layout above)
 ```
@@ -128,7 +128,7 @@ docker compose up -d
 docker compose exec bitsocial bitsocial challenge install @bitsocial/spam-blocker-challenge
 
 # Optional: install this before enabling the wordfilter preset example
-docker compose exec bitsocial bitsocial challenge install @bitsocial/wordfilter-challenge@0.2.0
+docker compose exec bitsocial bitsocial challenge install @bitsocial/wordfilter-challenge@0.3.0
 
 # Create a community (copy the created address from output)
 docker compose exec bitsocial bitsocial community create \
@@ -172,7 +172,7 @@ The bundled preset also contains a disabled wordfilter example. If you enable
 it, install the challenge on the same bitsocial-cli instance first:
 
 ```bash
-bitsocial challenge install @bitsocial/wordfilter-challenge@0.2.0
+bitsocial challenge install @bitsocial/wordfilter-challenge@0.3.0
 ```
 
 See [`docker-compose.standalone.example.yml`](docker-compose.standalone.example.yml) for the configuration.
@@ -258,11 +258,12 @@ after the clients used by the board support the `wordfilter/v1` contract. An
 older client cannot publish the unfiltered text; it receives the configured
 challenge error instead.
 
-The bundled preset contains a commented example that replaces `plebbit` with
-`bitcoin` in post and reply content, comment-edit content, and post titles. To
-enable it for a new board:
+The bundled preset contains a commented example with 4chan's classic filters,
+`soy` -> `onions`, `tbh` -> `desu` and `smh` -> `baka`, applied to post and
+reply content, comment-edit content, and post titles. To enable it for a new
+board:
 
-1. Install `@bitsocial/wordfilter-challenge@0.2.0` on the bitsocial-cli instance
+1. Install `@bitsocial/wordfilter-challenge@0.3.0` on the bitsocial-cli instance
    that hosts the community.
 2. Run `5chan board add ADDRESS --interactive-apply-defaults`.
 3. Choose **Modify**, uncomment the wordfilter challenge object, review the
@@ -276,8 +277,8 @@ editing an existing community's `settings.challenges` array:
   "name": "@bitsocial/wordfilter-challenge",
   "description": "Replaces configured words before publications are signed.",
   "options": {
-    "wordfilter/v1/rules": "[{\"src\":\"plebbit\",\"dst\":\"bitcoin\"}]",
-    "wordfilter/v1/fieldNames": "[\"content\",\"title\"]",
+    "wordfilter/v1/rules": "[{\"src\":\"soy\",\"dst\":\"onions\"},{\"src\":\"tbh\",\"dst\":\"desu\"},{\"src\":\"smh\",\"dst\":\"baka\"}]",
+    "wordfilter/v1/fieldNames": "[\"comment.content\",\"comment.title\",\"commentEdit.content\"]",
     "error": "This board replaces certain words. Please retry after refreshing the board."
   },
   "publicOptions": [
@@ -289,9 +290,16 @@ editing an existing community's `settings.challenges` array:
 ```
 
 The two contract options must remain in `publicOptions`: publishing clients
-need them to produce text the community will accept. Rules are literal and
-case-insensitive, not regular expressions. This example matches `plebbit`,
-`Plebbit`, and `PLEBBIT`, but not `p l e b b i t` or Unicode lookalikes.
+need them to produce text the community will accept. Field paths start with
+the publication type (`comment.content`, `commentEdit.content`,
+`vote.author.displayName`, ...), as required by wordfilter-challenge 0.3.0;
+bare paths such as `content` are rejected when the configuration is saved, and
+clients written against the 0.2.0 bare-path format do not apply prefixed paths,
+so their posts are rejected until they are updated. Rules are literal and
+case-insensitive substring matches, not regular expressions and not
+whole-word matches. This example matches `soy`, `Soy`, and `SOY`, and also
+the `soy` inside `soybean` (which becomes `onionsbean`, exactly as on 4chan),
+but not `s o y` or Unicode lookalikes.
 
 Invalid rules within one wordfilter challenge are rejected when the community
 configuration is saved. Each challenge allows at most 64 rules; source and
