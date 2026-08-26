@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.2.27](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.26...v0.2.27) (2026-08-26)
+
+### Features
+
+* **wordfilters:** target wordfilter-challenge 0.3.0 with publication-prefixed field paths ([7561ed8](https://github.com/bitsocialnet/5chan-board-manager/commit/7561ed86747a46e2211326cfe32ee8225b122114))
+
+### Bug Fixes
+
+* **wordfilters:** use 4chan's classic filters in the preset example ([c317418](https://github.com/bitsocialnet/5chan-board-manager/commit/c317418126da1b7d63244186720342bdb785f09b))
+
 ## [0.2.26](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.24...v0.2.26) (2026-08-21)
 
 ### Features
