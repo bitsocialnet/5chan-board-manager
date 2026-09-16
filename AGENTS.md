@@ -4,6 +4,7 @@
 - A bug fix requires either a reproduction of the reported behavior or conclusive source/runtime evidence that identifies both the defect and the correct fix with equivalent certainty.
 - If the bug cannot be reproduced and the evidence is not conclusive, do not guess or make speculative changes. Report what was checked, say that the bug was not reproduced, and ask for the missing reproduction details when useful.
 - When proceeding from conclusive evidence without a reproduction, explain why the evidence is sufficient and add a targeted regression test when practical.
+- After a bug fix or substantive review correction exposes a preventable mistake, use the [retro skill](.agents/skills/retro/SKILL.md) to consider the smallest lasting prevention. Routine successful edits do not need a retrospective; no additional check is a valid outcome. Keep review-only requests free of edits.
 - Never use `any` — always use proper types
 - After modifying any file under `src/`, run `npx tsc --noEmit` to verify the build has no type errors, then run `npm run build` so `dist/` stays in sync
 - After modifying types in `src/types.ts`, run `npx tsc --noEmit` to ensure all dependents still compile
