@@ -69,7 +69,7 @@
     "oclif": "4.22.59",
     "release-it": "19.2.4",
     "typescript": "7.0.2",
-    "vitest": "4.1.10"
+    "vitest": "4.1.11"
   },
   "config": {
     "commitizen": {
@@ -78,7 +78,7 @@
   },
   "overrides": {
     "@babel/core": "7.29.6",
-    "@libp2p/gossipsub": "16.0.4",
+    "@libp2p/gossipsub": "16.0.5",
     "@libp2p/kad-dht": "16.2.6",
     "@protobufjs/utf8": "1.1.1",
     "axios": "1.18.1",
@@ -95,7 +95,7 @@
     "handlebars": "4.7.9",
     "ip-address": "10.3.1",
     "js-yaml@3": "3.15.1",
-    "js-yaml@4": "4.3.1",
+    "js-yaml@4": "4.3.2",
     "lodash": "4.18.1",
     "minimatch@3": "3.1.4",
     "minimatch@5": "5.1.8",
