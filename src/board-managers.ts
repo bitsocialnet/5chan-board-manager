@@ -22,6 +22,7 @@ export interface BoardManagers {
 export interface BoardManagersRuntimeOptions {
   /** Shared heartbeat file path. Each board's heartbeat tick touches it. */
   heartbeatPath?: string
+  onRpcDisconnect?: () => void
 }
 
 /**

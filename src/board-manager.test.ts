@@ -21,9 +21,10 @@ function getPkcLoggerDebugModule(): DebugModule {
 
 vi.mock('./pkc-rpc.js', () => ({
   connectToPkcRpc: vi.fn(),
+  watchRpcDisconnect: vi.fn(() => vi.fn()),
 }))
 
-import { connectToPkcRpc } from './pkc-rpc.js'
+import { connectToPkcRpc, watchRpcDisconnect } from './pkc-rpc.js'
 
 // Helper to create a mock thread
 function mockThread(cid: string, overrides: Record<string, unknown> = {}): ThreadComment {
@@ -113,6 +114,96 @@ describe('board manager logic', () => {
 
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('releases the state lock and notifies the supervisor when RPC startup fails', async () => {
+    const error = new Error('RPC unavailable')
+    vi.mocked(connectToPkcRpc).mockRejectedValueOnce(error)
+    const onRpcDisconnect = vi.fn()
+    await expect(startBoardManager({
+      boardDir, communityAddress: 'board.bso', pkcRpcUrl: 'ws://localhost:9138', onRpcDisconnect,
+    })).rejects.toBe(error)
+    expect(onRpcDisconnect).toHaveBeenCalledOnce()
+    expect(existsSync(join(boardDir, 'state.json.lock'))).toBe(false)
+  })
+
+  it('releases the state lock and RPC client if community startup fails', async () => {
+    const { instance } = createMockPKC()
+    vi.mocked(instance.getCommunity).mockRejectedValueOnce(new Error('community unavailable'))
+    await expect(startBoardManager({
+      boardDir, communityAddress: 'board.bso', pkcRpcUrl: 'ws://localhost:9138',
+    })).rejects.toThrow('community unavailable')
+    expect(instance.destroy).toHaveBeenCalledOnce()
+    expect(existsSync(join(boardDir, 'state.json.lock'))).toBe(false)
+  })
+
+  it('detaches disconnect monitoring before intentional RPC teardown', async () => {
+    const { instance } = createMockPKC()
+    const community = createMockCommunity({})
+    vi.mocked(instance.getCommunity).mockResolvedValue(community as never)
+    const unwatch = vi.fn()
+    vi.mocked(watchRpcDisconnect).mockReturnValueOnce(unwatch)
+    const onRpcDisconnect = vi.fn()
+    const manager = await startBoardManager({
+      boardDir, communityAddress: 'board.bso', pkcRpcUrl: 'ws://localhost:9138', onRpcDisconnect,
+    })
+    try {
+      expect(watchRpcDisconnect).toHaveBeenLastCalledWith(instance, onRpcDisconnect)
+    } finally {
+      await manager.stop()
+    }
+    expect(unwatch).toHaveBeenCalled()
+    expect(unwatch.mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(instance.destroy).mock.invocationCallOrder[0])
+  })
+
+  it('keeps disconnect recovery armed while a hot-reload stop drains a publication', async () => {
+    const { instance, publishStarts } = createMockPKC(100)
+    const community = createMockCommunity({
+      pages: { active: { comments: [mockThread('QmNew'), mockThread('QmOld')] } as Page },
+    })
+    vi.mocked(instance.getCommunity).mockResolvedValue(community as never)
+    let disconnect = () => {}
+    const unwatch = vi.fn(() => { disconnect = () => {} })
+    vi.mocked(watchRpcDisconnect).mockImplementationOnce((_pkc, handler) => {
+      disconnect = handler
+      return unwatch
+    })
+    const onRpcDisconnect = vi.fn()
+    const manager = await startBoardManager({
+      boardDir, communityAddress: 'board.bso', pkcRpcUrl: 'ws://localhost:9138',
+      perPage: 1, pages: 1, onRpcDisconnect,
+    })
+    await vi.waitFor(() => expect(publishStarts).toHaveLength(1))
+    const stopping = manager.stop()
+    try {
+      disconnect()
+      expect(onRpcDisconnect).toHaveBeenCalledOnce()
+      expect(unwatch).not.toHaveBeenCalled()
+    } finally {
+      await stopping
+    }
+    expect(unwatch).toHaveBeenCalled()
+  })
+
+  it('requests supervisor recovery when RPC cleanup hangs during config reload', async () => {
+    const { instance } = createMockPKC()
+    const community = createMockCommunity({})
+    vi.mocked(instance.getCommunity).mockResolvedValue(community as never)
+    vi.mocked(instance.destroy).mockImplementationOnce(() => new Promise<void>(() => {}))
+    const onRpcDisconnect = vi.fn()
+    const manager = await startBoardManager({
+      boardDir, communityAddress: 'board.bso', pkcRpcUrl: 'ws://localhost:9138', onRpcDisconnect,
+    })
+    vi.useFakeTimers()
+    try {
+      const result = manager.stop().catch((error: unknown) => error)
+      await vi.waitFor(() => expect(instance.destroy).toHaveBeenCalled())
+      await vi.advanceTimersByTimeAsync(10_001)
+      expect(await result).toMatchObject({ message: 'RPC cleanup timed out after 10 seconds' })
+      expect(onRpcDisconnect).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   describe('state-based thread tracking', () => {

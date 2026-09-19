@@ -1,9 +1,9 @@
-import { connectToPkcRpc } from './pkc-rpc.js'
+import { connectToPkcRpc, watchRpcDisconnect } from './pkc-rpc.js'
 import Logger from '@pkcprotocol/pkc-logger'
 import { closeSync, openSync, utimesSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { loadState, saveState, acquireLock } from './state.js'
-import type { BoardManagerOptions, BoardManagerResult, BoardManagerState, Comment, FileLock, ModerationReasons, Community, Signer, ThreadComment, Page } from './types.js'
+import type { BoardManagerOptions, BoardManagerResult, BoardManagerState, Comment, FileLock, ModerationReasons, Community, Signer, ThreadComment, Page, PKCInstance } from './types.js'
 
 const log = Logger('bitsocial:5chan-board-manager:archiver')
 
@@ -97,7 +97,24 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
 
   log(`starting board manager for ${communityAddress} (capacity=${maxThreads}, bumpLimit=${bumpLimit}, purgeAfter=${archivePurgeSeconds}s)`)
 
-  const pkc = await connectToPkcRpc(pkcRpcUrl, userAgent)
+  let pkc: PKCInstance
+  try {
+    pkc = await connectToPkcRpc(pkcRpcUrl, userAgent)
+  } catch (error) {
+    await fileLock.release()
+    options.onRpcDisconnect?.()
+    throw error
+  }
+  const unwatchRpc = options.onRpcDisconnect
+    ? watchRpcDisconnect(pkc, options.onRpcDisconnect)
+    : () => {}
+
+  async function failStartup(error: unknown): Promise<never> {
+    unwatchRpc()
+    void pkc.destroy().catch(() => {})
+    await fileLock.release()
+    throw error
+  }
 
   async function ensureModRole(community: Community, signerAddress: string): Promise<void> {
     const roles = community.roles ?? {}
@@ -407,9 +424,14 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
   }
 
   // Startup: get signer, community, ensure mod role, subscribe to updates
-  const signer = await getOrCreateSigner()
-  const community = await pkc.getCommunity({ address: communityAddress })
-  await ensureModRole(community, signer.address)
+  let community: Community
+  try {
+    const signer = await getOrCreateSigner()
+    community = await pkc.getCommunity({ address: communityAddress })
+    await ensureModRole(community, signer.address)
+  } catch (error) {
+    return failStartup(error)
+  }
 
   let updateRunning = false
   let updatePendingRerun = false
@@ -463,7 +485,14 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
   }
 
   community.on('update', updateHandler)
-  await community.update()
+  try {
+    await community.update()
+  } catch (error) {
+    stopped = true
+    community.removeListener('update', updateHandler)
+    await workLock
+    return failStartup(error)
+  }
   log(`board manager running for ${communityAddress}`)
 
   // Archiving reacts to board activity, but purging is purely time-based: once a
@@ -549,8 +578,27 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
       await workLock
       saveState(statePath, state)
       await fileLock.release()
-      await community.stop?.()
-      await pkc.destroy()
+      let teardownTimer: NodeJS.Timeout | undefined
+      try {
+        await Promise.race([
+          (async () => {
+            await community.stop?.()
+            unwatchRpc()
+            await pkc.destroy()
+          })(),
+          new Promise<never>((_, reject) => {
+            // stop() also runs during config reload, outside the CLI's
+            // shutdown deadline. A lost unsubscribe must not stall reload.
+            teardownTimer = setTimeout(() => reject(new Error('RPC cleanup timed out after 10 seconds')), 10_000)
+          }),
+        ])
+      } catch (error) {
+        options.onRpcDisconnect?.()
+        throw error
+      } finally {
+        clearTimeout(teardownTimer)
+        unwatchRpc()
+      }
       log(`board manager stopped for ${communityAddress}`)
     },
   }
