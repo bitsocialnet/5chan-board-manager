@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.29](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.28...v0.2.29) (2026-09-19)
+
+### Bug Fixes
+
+* **deps:** patch vulnerable dependencies ([2d4e2bb](https://github.com/bitsocialnet/5chan-board-manager/commit/2d4e2bb43f4a87bcb13593abcdafb7b738a74bc4))
+* **deps:** retain optional websocket peers in lockfile ([10e11a1](https://github.com/bitsocialnet/5chan-board-manager/commit/10e11a144d38a65de7092cb1e74a5d4fcec57d9c))
+* **rpc:** recover board manager after disconnects [skip ci] ([5705198](https://github.com/bitsocialnet/5chan-board-manager/commit/570519818693e6860d1b2c75470de760772a0870))
+
 ## [0.2.28](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.27...v0.2.28) (2026-09-03)
 
 ## [0.2.27](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.26...v0.2.27) (2026-08-26)
