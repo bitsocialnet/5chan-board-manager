@@ -30,6 +30,8 @@ export interface BoardManagerOptions {
   pkcRpcUrl: string
   boardDir: string
   userAgent?: string
+  /** Daemon supervisor callback: rebuild all RPC subscriptions after a disconnect. */
+  onRpcDisconnect?: () => void
   perPage?: number
   pages?: number
   bumpLimit?: number

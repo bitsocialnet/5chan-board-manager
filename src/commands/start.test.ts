@@ -56,6 +56,7 @@ async function runCommand(args: string[], configDir: string): Promise<{ stdout: 
 
 describe('start command', () => {
   const dirs: string[] = []
+  let signalListeners: Set<unknown>
 
   function tmpDir(): string {
     const d = makeTmpDir()
@@ -65,13 +66,71 @@ describe('start command', () => {
 
   beforeEach(() => {
     mockStartManager.mockReset()
+    signalListeners = new Set([...process.listeners('SIGINT'), ...process.listeners('SIGTERM')])
   })
 
   afterEach(() => {
+    for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+      for (const listener of process.listeners(signal)) {
+        if (!signalListeners.has(listener)) process.removeListener(signal, listener)
+      }
+    }
+    vi.useRealTimers()
+    vi.restoreAllMocks()
     for (const d of dirs) {
       rmSync(d, { recursive: true, force: true })
     }
     dirs.length = 0
+  })
+
+  it('exits once with failure on a lost RPC session so Docker rebuilds subscriptions', async () => {
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never)
+    const manager = makeMockManager()
+    mockStartManager.mockResolvedValue(manager)
+    await runCommand([], tmpDir())
+    const runtime = mockStartManager.mock.calls[0][2]
+    expect(runtime?.onRpcDisconnect).toBeTypeOf('function')
+    runtime!.onRpcDisconnect!()
+    runtime!.onRpcDisconnect!()
+    process.emit('SIGTERM', 'SIGTERM')
+    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(1))
+    expect(exit).toHaveBeenCalledOnce()
+    expect(manager.stop).toHaveBeenCalledOnce()
+  })
+
+  it('forces failure exit after ten seconds if disconnected SDK teardown hangs', async () => {
+    vi.useFakeTimers()
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never)
+    const manager = makeMockManager({ stop: vi.fn(() => new Promise<void>(() => {})) })
+    mockStartManager.mockResolvedValue(manager)
+    await runCommand([], tmpDir())
+    mockStartManager.mock.calls[0][2]!.onRpcDisconnect!()
+    await vi.advanceTimersByTimeAsync(9_999)
+    expect(exit).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(exit).toHaveBeenCalledWith(1)
+  })
+
+  it('bounds shutdown when RPC fails while boards are still starting', async () => {
+    vi.useFakeTimers()
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never)
+    mockStartManager.mockImplementation(async (_dir, _config, runtime) => {
+      queueMicrotask(() => runtime!.onRpcDisconnect!())
+      return new Promise(() => {})
+    })
+    void runCommand([], tmpDir())
+    await vi.advanceTimersByTimeAsync(10_001)
+    expect(exit).toHaveBeenCalledWith(1)
+  })
+
+  it('exits successfully after an intentional stop', async () => {
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never)
+    const manager = makeMockManager()
+    mockStartManager.mockResolvedValue(manager)
+    await runCommand([], tmpDir())
+    process.emit('SIGTERM', 'SIGTERM')
+    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(0))
+    expect(manager.stop).toHaveBeenCalledOnce()
   })
 
   it('logs waiting message and starts with zero boards when none configured', async () => {

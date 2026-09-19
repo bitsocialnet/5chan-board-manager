@@ -2,7 +2,7 @@ import { Command, Flags } from '@oclif/core'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { loadConfig } from '../config-manager.js'
-import { startBoardManagers } from '../board-managers.js'
+import { startBoardManagers, type BoardManagers } from '../board-managers.js'
 import { pipeDebugLogsToLogFile } from '../file-logger.js'
 import { LOG_PATH } from '../defaults.js'
 
@@ -58,6 +58,40 @@ uncaught errors still reach the terminal.`
       stdoutWrite(`Daemon log file: ${logFilePath}\n`)
     }
 
+    let managerPromise: Promise<BoardManagers> | undefined
+    let shuttingDown = false
+    let exitCode = 0
+    const shutdown = async (requestedExitCode: number): Promise<void> => {
+      exitCode = Math.max(exitCode, requestedExitCode)
+      if (shuttingDown) return
+      shuttingDown = true
+      this.log('Shutting down...')
+      // A disconnected SDK may never finish an in-flight publication or
+      // unsubscribe. Docker must still be able to restart the whole session.
+      const deadline = setTimeout(() => process.exit(1), 10_000)
+      deadline.unref()
+      try {
+        const manager = await managerPromise
+        await manager?.stop()
+        if (logFile) await new Promise<void>((resolve) => logFile!.end(() => resolve()))
+      } catch {
+        exitCode = 1
+      } finally {
+        clearTimeout(deadline)
+        process.exit(exitCode)
+      }
+    }
+    const onSignal = (): void => { void shutdown(0) }
+    const onRpcDisconnect = (): void => {
+      if (shuttingDown) return
+      // This is operational output even when DEBUG is disabled. Never print
+      // the RPC URL: its path can contain the authentication key.
+      this.log('RPC session lost or unavailable; exiting for supervisor restart.')
+      void shutdown(1)
+    }
+    process.on('SIGINT', onSignal)
+    process.on('SIGTERM', onSignal)
+
     try {
       const config = loadConfig(configDir)
 
@@ -71,7 +105,9 @@ uncaught errors still reach the terminal.`
       this.log(`Watching config directory for changes`)
 
       const heartbeatPath = process.env['HEARTBEAT_FILE'] ?? join(flags['log-path'], 'heartbeat')
-      const manager = await startBoardManagers(configDir, config, { heartbeatPath })
+      managerPromise = startBoardManagers(configDir, config, { heartbeatPath, onRpcDisconnect })
+      const manager = await managerPromise
+      if (shuttingDown) return
 
       const started = manager.boardManagers.size
       const failed = manager.errors.size
@@ -79,23 +115,9 @@ uncaught errors still reach the terminal.`
       for (const [address, err] of manager.errors) {
         this.warn(`FAILED: ${address} — ${err.message}`)
       }
-
-      let shuttingDown = false
-
-      const shutdown = async (): Promise<void> => {
-        if (shuttingDown) return
-        shuttingDown = true
-        this.log('Shutting down...')
-        await manager.stop()
-        if (logFile) {
-          await new Promise<void>(resolve => logFile!.end(() => resolve()))
-        }
-        process.exit(0)
-      }
-
-      process.on('SIGINT', shutdown)
-      process.on('SIGTERM', shutdown)
     } catch (err) {
+      process.removeListener('SIGINT', onSignal)
+      process.removeListener('SIGTERM', onSignal)
       if (logFilePath) {
         const errorMsg = err instanceof Error ? err.message : String(err)
         stdoutWrite(`\nDaemon failed to start: ${errorMsg}\n\n`)
