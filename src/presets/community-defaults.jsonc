@@ -57,6 +57,9 @@
       // Each entry defines a challenge with a "name", "description", and "exclude" rules.
       // Challenges are evaluated in order; the first match is presented to the user.
       // "exclude" rules define who is exempted (e.g., moderators, trusted users).
+      // Mod bypass uses "roles", which needs pkc-js >= 0.0.101 on the node; those
+      // nodes reject the older "role" field. Older nodes ignore "roles", so their
+      // moderators get these challenges like everyone else.
 
       "challenges": [
         {
@@ -71,7 +74,7 @@
           },
           "exclude": [
             // Mod bypass.
-            { "role": ["moderator", "admin", "owner"] },
+            { "roles": ["moderator", "admin", "owner"] },
 
             // Anyone under 5 failed attempts per hour is excluded (allowed through).
             // Once failures hit 5/hr, this exclude stops matching and the fail
@@ -89,7 +92,7 @@
           },
           "exclude": [
             // Mod bypass.
-            { "role": ["moderator", "admin", "owner"] },
+            { "roles": ["moderator", "admin", "owner"] },
 
             // Exclude all non-commentEdit publication types.
             // publicationType matching is OR, so this challenge applies only to commentEdit.
@@ -155,7 +158,7 @@
             { "publicationType": { "reply": true } },
 
             // Mod bypass (no rate limit).
-            { "role": ["moderator", "admin", "owner"] },
+            { "roles": ["moderator", "admin", "owner"] },
 
             // Trusted bypass requires sustained activity + account age + under rate limit.
             // If rate limit is exceeded, trust bypass stops matching and the challenge kicks in.
@@ -185,7 +188,7 @@
             { "publicationType": { "post": true } },
 
             // Mod bypass (no rate limit).
-            { "role": ["moderator", "admin", "owner"] },
+            { "roles": ["moderator", "admin", "owner"] },
 
             // Trusted bypass requires activity + account age + under rate limit.
             // Higher rate limit than posts since replies are lower-impact, but
