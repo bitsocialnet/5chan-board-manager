@@ -164,6 +164,13 @@ describe('loadConfig', () => {
     expect(config.defaults?.moderationReasons?.archiveCapacity).toBe('custom')
   })
 
+  it('loads the no-archive moderation reasons', () => {
+    const dir = tmpDir()
+    writeBoardConfig(dir, { address: 'x.bso', moderationReasons: { purgeCapacity: 'purge', lockBumpLimit: 'lock' } })
+    const config = loadConfig(dir)
+    expect(config.boards[0].moderationReasons).toEqual({ purgeCapacity: 'purge', lockBumpLimit: 'lock' })
+  })
+
   it('rejects non-object moderationReasons', () => {
     const dir = tmpDir()
     writeBoardConfig(dir, { address: 'x.bso', moderationReasons: 42 })
@@ -458,6 +465,16 @@ describe('diffBoards', () => {
     expect(diff.removed).toHaveLength(0)
     expect(diff.changed).toHaveLength(1)
     expect(diff.changed[0]).toEqual({ address: 'a.bso', bumpLimit: 500 })
+  })
+
+  it('detects changed boards when a no-archive moderation reason changes', () => {
+    const oldConfig: MultiBoardConfig = {
+      boards: [{ address: 'a.bso', moderationReasons: { lockBumpLimit: 'old lock' } }],
+    }
+    const newConfig: MultiBoardConfig = {
+      boards: [{ address: 'a.bso', moderationReasons: { lockBumpLimit: 'new lock' } }],
+    }
+    expect(diffBoards(oldConfig, newConfig).changed).toHaveLength(1)
   })
 
   it('detects changed boards when a field is added', () => {

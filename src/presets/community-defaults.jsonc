@@ -19,6 +19,10 @@
       "purgeArchived": "5chan board manager: thread purged — archive retention expired",
       // Reason shown when author-deleted content is purged
       "purgeDeleted": "5chan board manager: content purged — author-deleted",
+      // Reason shown when a thread is purged because it fell past the last page of a board without an archive
+      "purgeCapacity": "5chan board manager: thread purged — exceeded board capacity",
+      // Reason shown when a thread on a board without an archive is locked at the bump limit
+      "lockBumpLimit": "5chan board manager: thread locked — reached bump limit",
     },
   },
 
@@ -44,6 +48,11 @@
 
       // Authors get new address per thread (post), but inside the same thread they retain the same identity
       "pseudonymityMode": "per-post",
+
+      // Uncomment for a board without an archive, like 4chan /b/ or /trash/. Threads that
+      // fall past the last page are purged right away instead of archived, threads at the
+      // bump limit are locked instead of archived, and 5chan hides the board's archive.
+      // "noArchive": true,
     },
     "settings": {
       // Fetch metadata for link-hosted media so clients know image/video dimensions

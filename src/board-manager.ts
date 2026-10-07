@@ -18,6 +18,8 @@ const DEFAULTS = {
     archiveBumpLimit: '5chan board manager: thread archived — reached bump limit',
     purgeArchived: '5chan board manager: thread purged — archive retention expired',
     purgeDeleted: '5chan board manager: content purged — author-deleted',
+    purgeCapacity: '5chan board manager: thread purged — exceeded board capacity',
+    lockBumpLimit: '5chan board manager: thread locked — reached bump limit',
   },
 } as const
 
@@ -79,6 +81,8 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
     archiveBumpLimit: options.moderationReasons?.archiveBumpLimit ?? DEFAULTS.moderationReasons.archiveBumpLimit,
     purgeArchived: options.moderationReasons?.purgeArchived ?? DEFAULTS.moderationReasons.purgeArchived,
     purgeDeleted: options.moderationReasons?.purgeDeleted ?? DEFAULTS.moderationReasons.purgeDeleted,
+    purgeCapacity: options.moderationReasons?.purgeCapacity ?? DEFAULTS.moderationReasons.purgeCapacity,
+    lockBumpLimit: options.moderationReasons?.lockBumpLimit ?? DEFAULTS.moderationReasons.lockBumpLimit,
   }
 
   const maxThreads = perPage * pages
@@ -94,6 +98,12 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
   let state: BoardManagerState = loadState(statePath)
 
   let stopped = false
+  let boardHadNoArchive = false
+
+  // Locks and purges published on a board without an archive leave no state entry, so these
+  // keep the next update from republishing them before the board's pages reflect the change.
+  const noArchivePurgedThreads = new Set<string>()
+  const noArchiveLockedThreads = new Set<string>()
 
   log(`starting board manager for ${communityAddress} (capacity=${maxThreads}, bumpLimit=${bumpLimit}, purgeAfter=${archivePurgeSeconds}s)`)
 
@@ -218,6 +228,17 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
     await mod.publish()
     delete state.archivedThreads[commentCid]
     saveState(statePath, state)
+  }
+
+  async function lockThread(commentCid: string, signer: Signer, reason: string): Promise<void> {
+    log(`locking thread ${commentCid} (${reason})`)
+    const mod = await pkc.createCommentModeration({
+      commentCid,
+      commentModeration: { locked: true, reason },
+      communityAddress,
+      signer,
+    })
+    await mod.publish()
   }
 
   async function purgeDeletedComment(commentCid: string, signer: Signer, reason: string): Promise<void> {
@@ -366,11 +387,40 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
       })
     }
 
+    // A board with features.noArchive has no archive, like 4chan /b/: threads that fall
+    // past capacity are purged right away, and threads at the bump limit are locked so they
+    // stop being bumped and sink off the board.
+    const boardHasNoArchive = community.features?.noArchive === true
+    if (boardHasNoArchive !== boardHadNoArchive) {
+      log(boardHasNoArchive
+        ? `${communityAddress} has no archive: purging threads past capacity and locking threads at the bump limit`
+        : `${communityAddress} has an archive again: archiving threads past capacity or at the bump limit`)
+      boardHadNoArchive = boardHasNoArchive
+    }
+    const threadCids = new Set(threads.map((thread) => thread.cid))
+    for (const pendingThreads of [noArchivePurgedThreads, noArchiveLockedThreads]) {
+      for (const cid of pendingThreads) {
+        if (!threadCids.has(cid)) pendingThreads.delete(cid)
+      }
+    }
+
     // Filter out pinned threads
     const nonPinned = threads.filter((t: ThreadComment) => !t.pinned)
 
-    // Archive threads beyond capacity
+    // Archive (or, without an archive, purge) threads beyond capacity
     for (const thread of nonPinned.slice(maxThreads)) {
+      if (boardHasNoArchive) {
+        // Includes threads archived earlier, by this manager or by hand: clients list no archive
+        // for such a board, so an archived thread would otherwise linger out of reach
+        if (noArchivePurgedThreads.has(thread.cid)) continue
+        try {
+          await purgeThread(thread.cid, signer, moderationReasons.purgeCapacity)
+          noArchivePurgedThreads.add(thread.cid)
+        } catch (err) {
+          log.error(`failed to purge thread ${thread.cid}: ${err}`)
+        }
+        continue
+      }
       if (thread.archived) continue
       if (state.archivedThreads[thread.cid]) continue
       try {
@@ -380,16 +430,26 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
       }
     }
 
-    // Archive threads past bump limit
-    for (const thread of nonPinned) {
+    // Archive (or, without an archive, lock) threads past bump limit. Without an archive,
+    // threads past capacity were just purged, so only the threads still on the board count.
+    for (const thread of boardHasNoArchive ? nonPinned.slice(0, maxThreads) : nonPinned) {
       if (thread.archived) continue
       if (state.archivedThreads[thread.cid]) continue
-      if ((thread.replyCount ?? 0) >= bumpLimit) {
+      if ((thread.replyCount ?? 0) < bumpLimit) continue
+      if (boardHasNoArchive) {
+        if (thread.locked || noArchiveLockedThreads.has(thread.cid)) continue
         try {
-          await archiveThread(thread.cid, signer, moderationReasons.archiveBumpLimit)
+          await lockThread(thread.cid, signer, moderationReasons.lockBumpLimit)
+          noArchiveLockedThreads.add(thread.cid)
         } catch (err) {
-          log.error(`failed to archive thread ${thread.cid}: ${err}`)
+          log.error(`failed to lock thread ${thread.cid}: ${err}`)
         }
+        continue
+      }
+      try {
+        await archiveThread(thread.cid, signer, moderationReasons.archiveBumpLimit)
+      } catch (err) {
+        log.error(`failed to archive thread ${thread.cid}: ${err}`)
       }
     }
 

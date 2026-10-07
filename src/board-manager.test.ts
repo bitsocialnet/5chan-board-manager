@@ -33,7 +33,7 @@ function mockThread(cid: string, overrides: Record<string, unknown> = {}): Threa
 
 interface MockModerationRecord {
   commentCid: string
-  commentModeration: { archived?: boolean; purged?: boolean; reason?: string }
+  commentModeration: { archived?: boolean; purged?: boolean; locked?: boolean; reason?: string }
   communityAddress: string
   signer: { address: string; privateKey: string; type: 'ed25519' }
 }
@@ -1519,6 +1519,221 @@ describe('board manager logic', () => {
         reason: '5chan board manager: content purged — author-deleted',
       })
       await boardManager.stop()
+    })
+  })
+
+  describe('boards without an archive', () => {
+    type MockCommunity = ReturnType<typeof createMockCommunity>
+
+    function withNoArchive(community: MockCommunity) {
+      return Object.assign(community, { features: { noArchive: true } })
+    }
+
+    async function startNoArchiveBoard(instance: PKCInstance, getPage: NonNullable<Parameters<typeof createMockCommunity>[0]['getPage']>, options: { perPage: number; pages: number; bumpLimit?: number }) {
+      const mockSub = withNoArchive(createMockCommunity({ pageCids: { active: 'QmPage1' }, pages: {}, getPage }))
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
+      const boardManager = await startBoardManager({
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
+        boardDir,
+        ...options,
+      })
+      return { boardManager, mockSub }
+    }
+
+    it('purges threads past capacity instead of archiving them', async () => {
+      const { instance, publishedModerations } = createMockPKC()
+      const threads = Array.from({ length: 4 }, (_, i) => mockThread(`QmN${i}`))
+      const getPage = vi.fn().mockResolvedValue({ comments: threads, nextCid: undefined } as Page)
+
+      const { boardManager } = await startNoArchiveBoard(instance, getPage, { perPage: 2, pages: 1 })
+
+      await vi.waitFor(() => {
+        expect(publishedModerations).toHaveLength(2)
+      })
+      await boardManager.stop()
+
+      expect(publishedModerations.map((m) => m.commentCid)).toEqual(['QmN2', 'QmN3'])
+      for (const mod of publishedModerations) {
+        expect(mod.commentModeration).toEqual({
+          purged: true,
+          reason: '5chan board manager: thread purged — exceeded board capacity',
+        })
+      }
+      expect(loadState(join(boardDir, 'state.json')).archivedThreads).toEqual({})
+    })
+
+    it('locks threads at the bump limit instead of archiving them', async () => {
+      const { instance, publishedModerations } = createMockPKC()
+      const threads = [
+        mockThread('QmBumped', { replyCount: 300 }),
+        mockThread('QmAlreadyLocked', { replyCount: 300, locked: true }),
+        mockThread('QmActive', { replyCount: 10 }),
+      ]
+      const getPage = vi.fn().mockResolvedValue({ comments: threads, nextCid: undefined } as Page)
+
+      const { boardManager } = await startNoArchiveBoard(instance, getPage, { perPage: 15, pages: 10, bumpLimit: 300 })
+
+      await vi.waitFor(() => {
+        expect(publishedModerations).toHaveLength(1)
+      })
+      await boardManager.stop()
+
+      expect(publishedModerations[0].commentCid).toBe('QmBumped')
+      expect(publishedModerations[0].commentModeration).toEqual({
+        locked: true,
+        reason: '5chan board manager: thread locked — reached bump limit',
+      })
+      expect(loadState(join(boardDir, 'state.json')).archivedThreads).toEqual({})
+    })
+
+    it('does not republish a lock or purge before the board reflects it', async () => {
+      const { instance, publishedModerations } = createMockPKC()
+      const threads = [
+        mockThread('QmBumped', { replyCount: 300 }),
+        mockThread('QmOverflow'),
+      ]
+      const getPage = vi.fn().mockResolvedValue({ comments: threads, nextCid: undefined } as Page)
+
+      const { boardManager, mockSub } = await startNoArchiveBoard(instance, getPage, { perPage: 1, pages: 1, bumpLimit: 300 })
+
+      await vi.waitFor(() => {
+        expect(publishedModerations).toHaveLength(2)
+      })
+      mockSub._triggerUpdate()
+      await vi.waitFor(() => {
+        expect(getPage).toHaveBeenCalledTimes(2)
+      })
+      await boardManager.stop()
+
+      expect(publishedModerations.map((m) => [m.commentCid, m.commentModeration.locked ?? false, m.commentModeration.purged ?? false])).toEqual([
+        ['QmOverflow', false, true],
+        ['QmBumped', true, false],
+      ])
+    })
+
+    it('purges a locked thread once it falls past capacity', async () => {
+      const { instance, publishedModerations } = createMockPKC()
+      const getPage = vi.fn()
+        .mockResolvedValueOnce({ comments: [mockThread('QmBumped', { replyCount: 300 })], nextCid: undefined } as Page)
+        .mockResolvedValue({ comments: [mockThread('QmNew'), mockThread('QmBumped', { replyCount: 300, locked: true })], nextCid: undefined } as Page)
+
+      const { boardManager, mockSub } = await startNoArchiveBoard(instance, getPage, { perPage: 1, pages: 1, bumpLimit: 300 })
+
+      await vi.waitFor(() => {
+        expect(publishedModerations).toHaveLength(1)
+      })
+      mockSub._triggerUpdate()
+      await vi.waitFor(() => {
+        expect(publishedModerations).toHaveLength(2)
+      })
+      await boardManager.stop()
+
+      expect(publishedModerations[0]).toMatchObject({ commentCid: 'QmBumped', commentModeration: { locked: true } })
+      expect(publishedModerations[1]).toMatchObject({ commentCid: 'QmBumped', commentModeration: { purged: true } })
+    })
+
+    it('purges threads archived earlier once they are past capacity', async () => {
+      const { instance, publishedModerations } = createMockPKC()
+      const threads = [
+        mockThread('QmKeep'),
+        mockThread('QmArchivedOnBoard', { archived: true }),
+        mockThread('QmArchivedByManager', { archived: true }),
+        mockThread('QmArchivedByHand', { archived: true }),
+      ]
+      const getPage = vi.fn().mockResolvedValue({ comments: threads, nextCid: undefined } as Page)
+      const archivedTimestamp = Math.floor(Date.now() / 1000)
+      saveState(join(boardDir, 'state.json'), {
+        signers: {},
+        archivedThreads: { QmArchivedOnBoard: { archivedTimestamp }, QmArchivedByManager: { archivedTimestamp } },
+      })
+
+      const { boardManager } = await startNoArchiveBoard(instance, getPage, { perPage: 2, pages: 1 })
+
+      await vi.waitFor(() => {
+        expect(publishedModerations).toHaveLength(2)
+      })
+      await boardManager.stop()
+
+      expect(publishedModerations.map((m) => [m.commentCid, m.commentModeration.purged])).toEqual([
+        ['QmArchivedByManager', true],
+        ['QmArchivedByHand', true],
+      ])
+      // Still on the board, so it keeps its retention window
+      expect(Object.keys(loadState(join(boardDir, 'state.json')).archivedThreads)).toEqual(['QmArchivedOnBoard'])
+    })
+
+    it('never purges pinned threads past capacity', async () => {
+      const { instance, publishedModerations } = createMockPKC()
+      const threads = [mockThread('QmA'), mockThread('QmPinned', { pinned: true }), mockThread('QmB')]
+      const getPage = vi.fn().mockResolvedValue({ comments: threads, nextCid: undefined } as Page)
+
+      const { boardManager } = await startNoArchiveBoard(instance, getPage, { perPage: 1, pages: 1 })
+
+      await vi.waitFor(() => {
+        expect(publishedModerations).toHaveLength(1)
+      })
+      await boardManager.stop()
+
+      expect(publishedModerations[0]).toMatchObject({ commentCid: 'QmB', commentModeration: { purged: true } })
+    })
+
+    it('follows features.noArchive as it changes between updates', async () => {
+      const { instance, publishedModerations } = createMockPKC()
+      const getPage = vi.fn()
+        .mockResolvedValueOnce({ comments: [mockThread('QmA'), mockThread('QmFirst')], nextCid: undefined } as Page)
+        .mockResolvedValueOnce({ comments: [mockThread('QmA'), mockThread('QmSecond')], nextCid: undefined } as Page)
+        .mockResolvedValue({ comments: [mockThread('QmA'), mockThread('QmThird')], nextCid: undefined } as Page)
+      const mockSub = createMockCommunity({ pageCids: { active: 'QmPage1' }, pages: {}, getPage }) as ReturnType<typeof createMockCommunity> & { features?: { noArchive?: boolean } }
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
+
+      const boardManager = await startBoardManager({ communityAddress: 'board.bso', pkcRpcUrl: 'ws://localhost:9138', boardDir, perPage: 1, pages: 1 })
+      await vi.waitFor(() => {
+        expect(publishedModerations).toHaveLength(1)
+      })
+
+      mockSub.features = { noArchive: true }
+      mockSub._triggerUpdate()
+      await vi.waitFor(() => {
+        expect(publishedModerations).toHaveLength(2)
+      })
+
+      mockSub.features = {}
+      mockSub._triggerUpdate()
+      await vi.waitFor(() => {
+        expect(publishedModerations).toHaveLength(3)
+      })
+      await boardManager.stop()
+
+      expect(publishedModerations.map((m) => [m.commentCid, m.commentModeration.archived ?? false, m.commentModeration.purged ?? false])).toEqual([
+        ['QmFirst', true, false],
+        ['QmSecond', false, true],
+        ['QmThird', true, false],
+      ])
+    })
+
+    it('uses custom reasons for capacity purges and bump-limit locks', async () => {
+      const { instance, publishedModerations } = createMockPKC()
+      const threads = [mockThread('QmBumped', { replyCount: 300 }), mockThread('QmOverflow')]
+      const getPage = vi.fn().mockResolvedValue({ comments: threads, nextCid: undefined } as Page)
+      const mockSub = withNoArchive(createMockCommunity({ pageCids: { active: 'QmPage1' }, pages: {}, getPage }))
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
+
+      const boardManager = await startBoardManager({
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
+        boardDir,
+        perPage: 1,
+        pages: 1,
+        moderationReasons: { purgeCapacity: 'Custom purge', lockBumpLimit: 'Custom lock' },
+      })
+
+      await vi.waitFor(() => {
+        expect(publishedModerations).toHaveLength(2)
+      })
+      await boardManager.stop()
+
+      expect(publishedModerations.map((m) => m.commentModeration.reason)).toEqual(['Custom purge', 'Custom lock'])
     })
   })
 

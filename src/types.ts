@@ -23,6 +23,8 @@ export interface ModerationReasons {
   archiveBumpLimit?: string
   purgeArchived?: string
   purgeDeleted?: string
+  purgeCapacity?: string
+  lockBumpLimit?: string
 }
 
 export interface BoardManagerOptions {

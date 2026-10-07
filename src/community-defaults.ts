@@ -15,6 +15,8 @@ export const ModerationReasonsSchema = z.object({
   archiveBumpLimit: z.string().optional(),
   purgeArchived: z.string().optional(),
   purgeDeleted: z.string().optional(),
+  purgeCapacity: z.string().optional(),
+  lockBumpLimit: z.string().optional(),
 }).strict()
 
 export const BoardManagerSettingsSchema = z.object({
