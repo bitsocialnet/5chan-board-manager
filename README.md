@@ -20,7 +20,18 @@ A CLI tool that implements 4chan-style thread auto-archiving and purging for 5ch
 - After `archive_purge_seconds` has elapsed since archiving → purge via `createCommentModeration({ commentModeration: { purged: true } })`
 - Purging is time-based rather than activity-based, so it also runs on a periodic sweep (`PURGE_SWEEP_INTERVAL_SECONDS`, default 60s) instead of only when a `community.update` event arrives. Without the sweep, a board that went quiet after archiving would keep expired threads in the archive until unrelated activity woke the manager.
 
-### Feature 4: Author-deleted comment purging
+### Feature 4: Boards without an archive
+
+A board whose community record sets `features.noArchive: true` has no archive, like 4chan's /b/ and /trash/:
+
+- Threads beyond position `per_page × pages` are purged right away via `createCommentModeration({ commentModeration: { purged: true } })` instead of archived
+- Threads that reach `bump_limit` are locked via `createCommentModeration({ commentModeration: { locked: true } })` instead of archived, so they stop being bumped and sink off the board
+- Threads archived earlier, by the board manager or by hand, are purged once they are past capacity, since clients no longer list an archive for the board. Ones the board manager archived also still expire through `archive_purge_seconds`
+- The flag is read from the community on every update, so it takes effect without restarting the board manager. pkc-js rejects archive moderations on such a board, and 5chan hides its archive
+
+Turn it on with bitsocial-cli (`bitsocial community edit <address> --features.noArchive`), or by uncommenting `noArchive` in the preset before running `5chan board add`.
+
+### Feature 5: Author-deleted comment purging
 
 - On each update, scan comments and replies for `deleted === true`
 - Purge via `createCommentModeration({ commentModeration: { purged: true } })`
@@ -59,7 +70,9 @@ Config and state are stored per-board under `~/.config/5chan/`, managed via `5ch
       "archiveCapacity": "5chan board manager: thread archived — exceeded board capacity",
       "archiveBumpLimit": "5chan board manager: thread archived — reached bump limit",
       "purgeArchived": "5chan board manager: thread purged — archive retention expired",
-      "purgeDeleted": "5chan board manager: content purged — author-deleted"
+      "purgeDeleted": "5chan board manager: content purged — author-deleted",
+      "purgeCapacity": "5chan board manager: thread purged — exceeded board capacity",
+      "lockBumpLimit": "5chan board manager: thread locked — reached bump limit"
     }
   }
 }
@@ -71,7 +84,7 @@ All fields except each board's `address` are optional:
 - `rpcUrl` — falls back to `PKC_RPC_WS_URL` env var, then `ws://localhost:9138`
 - `defaults` — applied to all boards unless overridden per-board
 - Per-board fields (`perPage`, `pages`, `bumpLimit`, `archivePurgeSeconds`, `moderationReasons`) override `defaults`
-- `moderationReasons` — optional object with `archiveCapacity`, `archiveBumpLimit`, `purgeArchived`, `purgeDeleted` string fields. Per-board values override defaults per-field (not the whole object). These reason strings are passed to `createCommentModeration()` so PKC clients can display why a thread was archived or purged.
+- `moderationReasons` — optional object with `archiveCapacity`, `archiveBumpLimit`, `purgeArchived`, `purgeDeleted`, `purgeCapacity`, `lockBumpLimit` string fields (the last two apply only to boards without an archive). Per-board values override defaults per-field (not the whole object). These reason strings are passed to `createCommentModeration()` so PKC clients can display why a thread was archived or purged.
 - Board directory names must match the address field in `config.json`
 
 
@@ -882,9 +895,9 @@ Uses 4chan field names for interoperability.
 |---------|---------|-------------|-------------|
 | `per_page` | 15 | 15–30 | Threads per index page |
 | `pages` | 10 | 1–10 | Number of index pages |
-| `bump_limit` | 300 | 300–500 | Max replies before thread is archived |
+| `bump_limit` | 300 | 300–500 | Max replies before thread is archived (locked on boards without an archive) |
 | `archive_purge_seconds` | 172800 (48h) | ~48h | Seconds before archived posts are purged (no 4chan equivalent, 4chan uses ~48h) |
-| `moderationReasons` | (see below) | — | Reason strings passed to `createCommentModeration()`. Fields: `archiveCapacity`, `archiveBumpLimit`, `purgeArchived`, `purgeDeleted` |
+| `moderationReasons` | (see below) | — | Reason strings passed to `createCommentModeration()`. Fields: `archiveCapacity`, `archiveBumpLimit`, `purgeArchived`, `purgeDeleted`, `purgeCapacity`, `lockBumpLimit` |
 
 **Max active threads** = `per_page × pages` (default: 150)
 

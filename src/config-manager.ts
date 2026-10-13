@@ -255,7 +255,7 @@ function validateNumericFields(obj: Record<string, unknown>, prefix: string, con
   }
 }
 
-const MODERATION_REASONS_KEYS = ['archiveCapacity', 'archiveBumpLimit', 'purgeArchived', 'purgeDeleted'] as const
+const MODERATION_REASONS_KEYS = ['archiveCapacity', 'archiveBumpLimit', 'purgeArchived', 'purgeDeleted', 'purgeCapacity', 'lockBumpLimit'] as const
 
 function validateModerationReasons(obj: Record<string, unknown>, prefix: string, configPath: string): void {
   if (obj.moderationReasons === undefined) return
@@ -279,7 +279,9 @@ function moderationReasonsChanged(a: ModerationReasons | undefined, b: Moderatio
     a?.archiveCapacity !== b?.archiveCapacity ||
     a?.archiveBumpLimit !== b?.archiveBumpLimit ||
     a?.purgeArchived !== b?.purgeArchived ||
-    a?.purgeDeleted !== b?.purgeDeleted
+    a?.purgeDeleted !== b?.purgeDeleted ||
+    a?.purgeCapacity !== b?.purgeCapacity ||
+    a?.lockBumpLimit !== b?.lockBumpLimit
   )
 }
 

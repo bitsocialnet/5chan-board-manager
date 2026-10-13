@@ -35,6 +35,8 @@ export function resolveBoardManagerOptions(board: BoardConfig, config: MultiBoar
       archiveBumpLimit: boardReasons?.archiveBumpLimit ?? defaultReasons?.archiveBumpLimit,
       purgeArchived: boardReasons?.purgeArchived ?? defaultReasons?.purgeArchived,
       purgeDeleted: boardReasons?.purgeDeleted ?? defaultReasons?.purgeDeleted,
+      purgeCapacity: boardReasons?.purgeCapacity ?? defaultReasons?.purgeCapacity,
+      lockBumpLimit: boardReasons?.lockBumpLimit ?? defaultReasons?.lockBumpLimit,
     }
   }
 

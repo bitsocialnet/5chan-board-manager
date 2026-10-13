@@ -231,6 +231,8 @@ describe('community defaults preset loading', () => {
         moderationReasons: {
           archiveCapacity: 'custom capacity',
           purgeDeleted: 'custom purge',
+          purgeCapacity: 'custom capacity purge',
+          lockBumpLimit: 'custom bump lock',
         },
       },
     }))
@@ -238,6 +240,8 @@ describe('community defaults preset loading', () => {
     const preset = await loadCommunityDefaultsPreset(presetPath)
     expect(preset.boardManagerSettings.moderationReasons?.archiveCapacity).toBe('custom capacity')
     expect(preset.boardManagerSettings.moderationReasons?.purgeDeleted).toBe('custom purge')
+    expect(preset.boardManagerSettings.moderationReasons?.purgeCapacity).toBe('custom capacity purge')
+    expect(preset.boardManagerSettings.moderationReasons?.lockBumpLimit).toBe('custom bump lock')
   })
 })
 

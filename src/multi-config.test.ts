@@ -264,6 +264,25 @@ describe('resolveBoardManagerOptions', () => {
     expect(opts.moderationReasons?.archiveBumpLimit).toBe('default bump')
   })
 
+  it('merges the no-archive moderation reasons per-field', () => {
+    const board: BoardConfig = {
+      address: 'a.bso',
+      moderationReasons: { lockBumpLimit: 'board lock' },
+    }
+    const config: MultiBoardConfig = {
+      defaults: {
+        moderationReasons: {
+          purgeCapacity: 'default purge',
+          lockBumpLimit: 'default lock',
+        },
+      },
+      boards: [board],
+    }
+    const opts = resolveBoardManagerOptions(board, config, '/test/config')
+    expect(opts.moderationReasons?.purgeCapacity).toBe('default purge')
+    expect(opts.moderationReasons?.lockBumpLimit).toBe('board lock')
+  })
+
   it('returns undefined moderationReasons when neither board nor defaults set it', () => {
     const board: BoardConfig = { address: 'a.bso' }
     const config: MultiBoardConfig = { boards: [board] }
