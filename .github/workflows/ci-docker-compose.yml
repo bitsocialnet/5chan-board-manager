@@ -169,8 +169,7 @@ jobs:
           echo "$BOARD_JSON" | jq -e '.pages == 10'
           echo "$BOARD_JSON" | jq -e '.bumpLimit == 300'
           echo "$BOARD_JSON" | jq -e '.archivePurgeSeconds == 172800'
-          echo "$BOARD_JSON" | jq -e '.moderationReasons | keys | length == 4'
-          echo "$BOARD_JSON" | jq -e '.moderationReasons | has("archiveCapacity", "archiveBumpLimit", "purgeArchived", "purgeDeleted")'
+          echo "$BOARD_JSON" | jq -e '.moderationReasons | keys == ["archiveBumpLimit", "archiveCapacity", "lockBumpLimit", "purgeArchived", "purgeCapacity", "purgeDeleted"]'
 
       - name: Verify board list
         run: |
