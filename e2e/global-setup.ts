@@ -17,8 +17,8 @@ import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { path as kuboBinaryPath } from 'kubo'
 import PKCRpc from '@pkcprotocol/pkc-js/rpc'
+import { resolveKuboBinary } from './kubo.js'
 
 const E2E_RPC_PORT = 19138
 
@@ -30,15 +30,15 @@ function apiFileToHttpUrl(apiFileContent: string): string {
   return `http://${host}:${port}/api/v0`
 }
 
-async function startKubo(ipfsPath: string): Promise<{ process: ChildProcess; apiUrl: string }> {
+async function startKubo(kuboBinary: string, ipfsPath: string): Promise<{ process: ChildProcess; apiUrl: string }> {
   const env = { ...process.env, IPFS_PATH: ipfsPath }
 
-  const init = spawnSync(kuboBinaryPath(), ['init', '--profile', 'test'], { env })
+  const init = spawnSync(kuboBinary, ['init', '--profile', 'test'], { env })
   if (init.status !== 0) {
     throw new Error(`ipfs init failed: ${init.stderr?.toString() ?? ''}`)
   }
 
-  const daemon = spawn(kuboBinaryPath(), ['daemon', '--enable-pubsub-experiment', '--enable-namesys-pubsub'], { env })
+  const daemon = spawn(kuboBinary, ['daemon', '--enable-pubsub-experiment', '--enable-namesys-pubsub'], { env })
 
   try {
     await new Promise<void>((resolve, reject) => {
@@ -76,10 +76,11 @@ export default async function setup(): Promise<() => Promise<void>> {
     return async () => {}
   }
 
+  const kuboBinary = await resolveKuboBinary()
   const ipfsPath = mkdtempSync(join(tmpdir(), 'pkc-rpc-e2e-ipfs-'))
   const dataPath = mkdtempSync(join(tmpdir(), 'pkc-rpc-e2e-data-'))
 
-  const kubo = await startKubo(ipfsPath)
+  const kubo = await startKubo(kuboBinary, ipfsPath)
 
   const server = await PKCRpc.PKCWsServer({
     port: E2E_RPC_PORT,

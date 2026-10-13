@@ -65,7 +65,6 @@
     "commitizen": "4.3.1",
     "cz-conventional-changelog": "3.3.0",
     "husky": "9.1.7",
-    "kubo": "0.41.0",
     "oclif": "4.22.59",
     "release-it": "19.2.4",
     "typescript": "7.0.2",

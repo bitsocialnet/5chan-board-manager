@@ -860,7 +860,7 @@ End-to-end tests run the real board manager against a real PKC RPC server:
 npm run test:e2e
 ```
 
-The e2e suite spawns its own Kubo (IPFS) daemon on random ports and an in-process PKC RPC server on port `19138`. All state is written to temp directories that are removed at teardown. No `bitsocial-cli` or docker-compose stack needs to be running — Kubo is provided by the `kubo` npm package installed as a devDependency.
+The e2e suite spawns its own Kubo (IPFS) daemon on random ports and an in-process PKC RPC server on port `19138`. All state is written to temp directories that are removed at teardown. No `bitsocial-cli` or docker-compose stack needs to be running. On first run the suite downloads the pinned Kubo release from GitHub, checks it against a pinned SHA-512 and caches it under `node_modules/.cache/kubo`; set `KUBO_BINARY` to use an existing `ipfs` binary instead.
 
 To point the suite at an externally-running RPC instead (e.g. a long-lived docker-compose stack), set `PKC_RPC_WS_URL` before invoking the script — when set, global-setup skips spawning and uses the provided URL verbatim:
 
