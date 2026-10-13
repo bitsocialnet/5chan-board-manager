@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.31](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.30...v0.2.31) (2026-10-13)
+
+### Features
+
+* **boards:** purge or lock instead of archiving on boards with features.noArchive ([#12](https://github.com/bitsocialnet/5chan-board-manager/issues/12)) ([2b6fda3](https://github.com/bitsocialnet/5chan-board-manager/commit/2b6fda38da511a990f3955f29fbc5e0ec2a1e456))
+
+### Bug Fixes
+
+* **preset:** use exclude.roles for the mod bypass ([#11](https://github.com/bitsocialnet/5chan-board-manager/issues/11)) ([5380cfa](https://github.com/bitsocialnet/5chan-board-manager/commit/5380cfa30c3831a8c054882374610fda43eccb9c))
+
+### Build System
+
+* stop installing kubo from dist.ipfs.tech ([#13](https://github.com/bitsocialnet/5chan-board-manager/issues/13)) ([4f4389b](https://github.com/bitsocialnet/5chan-board-manager/commit/4f4389b3c5631f3986a8f9581ed8f875ecd3def4))
+
 ## [0.2.30](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.29...v0.2.30) (2026-09-29)
 
 ## [0.2.29](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.28...v0.2.29) (2026-09-19)
