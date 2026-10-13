@@ -242,6 +242,8 @@ Preset JSONC is validated with Zod. Both plain JSON and JSONC (with `//` comment
 `boardSettings` must follow pkc-js `CommunityEditOptions`:
 https://github.com/pkcprotocol/pkc-js?tab=readme-ov-file#communityeditcommunityeditoptions
 
+> **Moderator bypass:** The bundled preset exempts moderators from its challenges with `{ "roles": ["moderator", "admin", "owner"] }`. Nodes on pkc-js 0.0.101 or later reject the older `exclude.role` field (`ERR_CHALLENGE_EXCLUDE_ROLE_FIELD_RENAMED`), so custom presets must use `roles` as well. Nodes on older pkc-js accept `roles` but ignore it, so their moderators get the preset's challenges like other users.
+
 Bundled preset JSONC defaults:
 [`src/presets/community-defaults.jsonc`](src/presets/community-defaults.jsonc)
 

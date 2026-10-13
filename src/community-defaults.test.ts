@@ -296,6 +296,20 @@ describe('pkc-js schema-util resolution', () => {
     expect(preset.boardSettings.settings?.challenges).toHaveLength(4)
     expect(preset.boardManagerSettings.perPage).toBe(15)
   })
+
+  // pkc-js 0.0.101 renamed exclude.role to exclude.roles and rejects the old key
+  // (ERR_CHALLENGE_EXCLUDE_ROLE_FIELD_RENAMED), which fails `board add --apply-defaults`
+  // on those nodes. The installed pkc-js predates the rename and accepts either key,
+  // so assert the key directly, after the real parser has run.
+  it('uses exclude.roles for the mod bypass in every shipped challenge', async () => {
+    const preset = await loadCommunityDefaultsPreset()
+    const challenges = preset.boardSettings.settings?.challenges ?? []
+    expect(challenges).toHaveLength(4)
+    for (const challenge of challenges) {
+      expect(challenge.exclude).toContainEqual({ roles: ['moderator', 'admin', 'owner'] })
+      for (const exclude of challenge.exclude ?? []) expect(exclude).not.toHaveProperty('role')
+    }
+  })
 })
 
 describe('buildMissingObjectPatch', () => {
