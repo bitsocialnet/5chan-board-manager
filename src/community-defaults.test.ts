@@ -438,6 +438,26 @@ describe('buildCommunityDefaultsPatch settings', () => {
     })
   })
 
+  it('keeps nested settings the patch does not change', () => {
+    // The board already runs the preset's pages, but with another bump limit:
+    // only pages.posts differs, so the patch must not drop pages.replies
+    const replies = [{ name: 'old', preloaded: true }, { name: 'new' }]
+    const community = createMockCommunity({
+      settings: {
+        fetchThumbnailUrls: true,
+        pages: { posts: [{ name: '@pkcprotocol/active-page-sort', options: { bumpLimit: '300' }, preloaded: true }], replies },
+      },
+    })
+    const posts = [{ name: '@pkcprotocol/active-page-sort', options: { bumpLimit: '250' }, preloaded: true }]
+
+    const { patch } = buildCommunityDefaultsPatch(community, {
+      boardSettings: { settings: { fetchThumbnailUrls: true, pages: { posts, replies } } },
+      boardManagerSettings: {},
+    })
+
+    expect(patch).toEqual({ settings: { fetchThumbnailUrls: true, pages: { posts, replies } } })
+  })
+
   it('leaves settings out of the patch when nothing in them is missing', () => {
     const community = createMockCommunity({ features: {}, settings: { fetchThumbnailUrls: true } })
 
