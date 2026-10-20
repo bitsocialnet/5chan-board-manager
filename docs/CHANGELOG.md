@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.33](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.32...v0.2.33) (2026-10-20)
+
+### Features
+
+* **preset:** run @pkcprotocol/active-page-sort and move the bump limit into it ([#19](https://github.com/bitsocialnet/5chan-board-manager/issues/19)) ([7b65e1c](https://github.com/bitsocialnet/5chan-board-manager/commit/7b65e1c5265bf4e9a9c6e724f76694cd84ac97bd)), closes [#15](https://github.com/bitsocialnet/5chan-board-manager/issues/15) [#16](https://github.com/bitsocialnet/5chan-board-manager/issues/16)
+
 ## [0.2.32](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.31...v0.2.32) (2026-10-20)
 
 ## [0.2.31](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.30...v0.2.31) (2026-10-13)
