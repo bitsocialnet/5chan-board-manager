@@ -5,7 +5,10 @@
     "perPage": 15,
     // Number of pages on the board. Total thread capacity = perPage x pages
     "pages": 10,
-    // Max replies before a thread stops being bumped and gets archived
+    // Replies past a thread's first bumpLimit no longer bump it: it stays open, sinks, and is
+    // archived once it falls off the last page (4chan behaviour). Applied by
+    // @pkcprotocol/active-page-sort (see "pages" below); the board manager writes this value
+    // into the sort's bumpLimit option, so a board that does not run the sort has no bump limit.
     "bumpLimit": 300,
     // How long archived threads are kept before permanent deletion and purge, in seconds (172800 = 48h)
     "archivePurgeSeconds": 172800,
@@ -13,16 +16,12 @@
     "moderationReasons": {
       // Reason shown when a thread is archived because it fell past the last page
       "archiveCapacity": "5chan board manager: thread archived — exceeded board capacity",
-      // Reason shown when a thread hits the bump limit
-      "archiveBumpLimit": "5chan board manager: thread archived — reached bump limit",
       // Reason shown when an archived thread is permanently purged after retention expires
       "purgeArchived": "5chan board manager: thread purged — archive retention expired",
       // Reason shown when author-deleted content is purged
       "purgeDeleted": "5chan board manager: content purged — author-deleted",
       // Reason shown when a thread is purged because it fell past the last page of a board without an archive
       "purgeCapacity": "5chan board manager: thread purged — exceeded board capacity",
-      // Reason shown when a thread on a board without an archive is locked at the bump limit
-      "lockBumpLimit": "5chan board manager: thread locked — reached bump limit",
     },
   },
 
@@ -217,6 +216,42 @@
           ],
         },
       ],
+
+      // Page sorts the board publishes. Replaces pkc-js's nine default post sorts and five
+      // reply sorts with what 5chan reads, which saves publish time and IPFS bytes.
+      // Any change to "pages" regenerates every CommentUpdate once, on the next pass.
+      // Before applying this preset, install the sort in bitsocial-cli (>= 0.19.107):
+      //   bitsocial page-sort install @pkcprotocol/active-page-sort@0.0.7
+      // Without it, `5chan board add --apply-defaults` is rejected by the RPC server
+      // (ERR_RPC_CLIENT_PAGE_SORT_NAME_NOT_AVAILABLE_ON_SERVER); remove the posts entry
+      // or use --skip-apply-defaults instead.
+      "pages": {
+        "posts": [
+          {
+            // Bump order where a reply whose content has a line equal to "sage" does not
+            // bump its thread. Publishes under the "active" key 5chan reads (board, catalog,
+            // archive; the catalog's other orders are re-sorted client-side).
+            "name": "@pkcprotocol/active-page-sort",
+            "options": {
+              "noBumpKeywords": "sage",
+              // Overwritten with the board's own boardManagerSettings.bumpLimit when the
+              // preset is applied and whenever the board manager starts.
+              "bumpLimit": "300",
+            },
+            "preloaded": true,
+          },
+          // 5chan v0.10.0 and older (desktop/Android builds not yet updated) fetch the
+          // "new" sort for the catalog's "creation date" option. To keep that option
+          // working for them, add: { "name": "new" }
+        ],
+        "replies": [
+          // Thread view: oldest first, embedded in the record.
+          { "name": "old", "preloaded": true },
+          // Board-view reply preview: newest first, fetched on demand. 5chan requests the
+          // "old"/"new" keys and flattens them client-side, so these are not oldFlat/newFlat.
+          { "name": "new" },
+        ],
+      },
     },
   },
 }

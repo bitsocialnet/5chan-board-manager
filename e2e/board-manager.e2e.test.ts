@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { startBoardManager } from '../src/board-manager.js'
-import type { PKCInstance, BoardManagerResult } from '../src/types.js'
+import type { PKCInstance, BoardManagerResult, Community } from '../src/types.js'
 import {
   RPC_URL,
   createPkcRpc,
@@ -140,42 +140,199 @@ describe('board manager E2E', () => {
   })
 
   describe('bump limit', () => {
-    it('archives thread that reaches bump limit', async () => {
+    const SORT_NAME = '@pkcprotocol/active-page-sort'
+
+    async function runActivePageSort(sub: Community, bumpLimit: string): Promise<void> {
+      await sub.edit({
+        settings: {
+          ...sub.settings,
+          pages: {
+            posts: [{ name: SORT_NAME, options: { noBumpKeywords: 'sage', bumpLimit }, preloaded: true }],
+            replies: [{ name: 'old', preloaded: true }, { name: 'new' }],
+          },
+        },
+      })
+    }
+
+    /** Resolve once `condition` holds on the community, checking now and on every update. */
+    async function waitForCommunity(sub: Community, condition: () => boolean, what: string, timeoutMs = 120_000): Promise<void> {
+      if (condition()) return
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          sub.removeListener('update', check)
+          reject(new Error(`timed out waiting for ${what}`))
+        }, timeoutMs)
+        function check() {
+          if (!condition()) return
+          clearTimeout(timeout)
+          sub.removeListener('update', check)
+          resolve()
+        }
+        sub.on('update', check)
+      })
+    }
+
+    // Comment timestamps have one-second resolution, so steps that must be
+    // ordered in time are spaced out
+    const nextSecond = () => new Promise((resolve) => setTimeout(resolve, 1_100))
+
+    /**
+     * A, a reply to A, then B, then C, then a second reply to A. With a bump
+     * limit of 1 the second reply does not bump A, so the order is C, B, A;
+     * without a limit (and in lastReplyTimestamp order) it is A, C, B.
+     */
+    async function publishThreadPastBumpLimit(sub: Community, address: string) {
+      const a = await publishThread(pkc, address, 'Thread A')
+      await waitForThreadInPages(sub, a.cid)
+      await nextSecond()
+      await publishReply(pkc, address, a.cid)
+      await waitForReplyCount(sub, a.cid, 1)
+      await nextSecond()
+      const b = await publishThread(pkc, address, 'Thread B')
+      await waitForThreadInPages(sub, b.cid)
+      await nextSecond()
+      const c = await publishThread(pkc, address, 'Thread C')
+      await waitForThreadInPages(sub, c.cid)
+      await nextSecond()
+      await publishReply(pkc, address, a.cid)
+      await waitForReplyCount(sub, a.cid, 2)
+      return { a, b, c }
+    }
+
+    it('writes the configured bump limit into active-page-sort', async () => {
       const { sub, address } = await createTestCommunity(pkc)
       const { dir, statePath } = createTempStateDir()
       let boardManager: BoardManagerResult | undefined
 
       try {
-        // Publish 1 thread + 3 replies
-        const thread = await publishThread(pkc, address, 'Bump Limit Thread')
-        await waitForThreadInPages(sub, thread.cid)
+        await runActivePageSort(sub, '300')
+        await waitForCommunity(sub, () => sub.pageSorts?.posts?.active?.name === SORT_NAME, 'the sort to be published')
 
-        await publishReply(pkc, address, thread.cid)
-        await publishReply(pkc, address, thread.cid)
-        await publishReply(pkc, address, thread.cid)
-
-        // Wait for replyCount to reach 3 in pages
-        await waitForReplyCount(sub, thread.cid, 3)
-
-        // bumpLimit=3, large capacity so only bump limit triggers
         boardManager = await startBoardManager({
           communityAddress: address,
           pkcRpcUrl: RPC_URL,
           boardDir: dir,
-          bumpLimit: 3,
+          bumpLimit: 7,
+        })
+        await waitForSignerInState(statePath, address)
+
+        await waitForCommunity(
+          sub,
+          () => sub.pageSorts?.posts?.active?.publicOptions?.bumpLimit === '7',
+          'the published sort to carry bumpLimit 7',
+        )
+        const entry = sub.settings?.pages?.posts?.[0]
+        expect(entry).toEqual({ name: SORT_NAME, options: { noBumpKeywords: 'sage', bumpLimit: '7' }, preloaded: true })
+        // The rest of the settings survive the edit
+        expect(sub.settings?.challenges).toEqual([])
+        expect(sub.settings?.pages?.replies).toEqual([{ name: 'old', preloaded: true }, { name: 'new' }])
+      } finally {
+        if (boardManager) await boardManager.stop()
+        await sub.stop()
+        cleanupTempDir(dir)
+      }
+    })
+
+    it('lets a thread past the bump limit sink and archives it at capacity', async () => {
+      const { sub, address } = await createTestCommunity(pkc)
+      const { dir, statePath } = createTempStateDir()
+      let boardManager: BoardManagerResult | undefined
+
+      try {
+        await runActivePageSort(sub, '1')
+        await waitForCommunity(sub, () => sub.pageSorts?.posts?.active?.publicOptions?.bumpLimit === '1', 'the sort to be published')
+        const { a, b, c } = await publishThreadPastBumpLimit(sub, address)
+
+        // capacity = 1 * 2 = 2: only the thread that sank below B and C goes
+        boardManager = await startBoardManager({
+          communityAddress: address,
+          pkcRpcUrl: RPC_URL,
+          boardDir: dir,
+          bumpLimit: 1,
+          perPage: 1,
+          pages: 2,
+        })
+
+        await waitForArchivedInState(statePath, a.cid)
+        await waitForThreadArchived(sub, a.cid)
+        // A few more update cycles, to catch a wrong archive of B or C
+        await new Promise((resolve) => setTimeout(resolve, 10_000))
+
+        const state = readStateFile(statePath)
+        expect(Object.keys(state.archivedThreads)).toEqual([a.cid])
+        const threads = await getAllThreads(sub)
+        expect(threads.find((t) => t.cid === b.cid)?.archived).toBeUndefined()
+        expect(threads.find((t) => t.cid === c.cid)?.archived).toBeUndefined()
+      } finally {
+        if (boardManager) await boardManager.stop()
+        await sub.stop()
+        cleanupTempDir(dir)
+      }
+    })
+
+    it('does not archive a thread at the bump limit while it is within capacity', async () => {
+      const { sub, address } = await createTestCommunity(pkc)
+      const { dir, statePath } = createTempStateDir()
+      let boardManager: BoardManagerResult | undefined
+
+      try {
+        await runActivePageSort(sub, '1')
+        await waitForCommunity(sub, () => sub.pageSorts?.posts?.active?.publicOptions?.bumpLimit === '1', 'the sort to be published')
+        await publishThreadPastBumpLimit(sub, address)
+
+        boardManager = await startBoardManager({
+          communityAddress: address,
+          pkcRpcUrl: RPC_URL,
+          boardDir: dir,
+          bumpLimit: 1,
           perPage: 15,
           pages: 10,
         })
+        await waitForSignerInState(statePath, address)
+        await new Promise((resolve) => setTimeout(resolve, 10_000))
 
-        // Wait for thread to be archived in state
-        await waitForArchivedInState(statePath, thread.cid)
+        expect(Object.keys(readStateFile(statePath).archivedThreads)).toHaveLength(0)
+      } finally {
+        if (boardManager) await boardManager.stop()
+        await sub.stop()
+        cleanupTempDir(dir)
+      }
+    })
 
-        // Verify state
+    it('archives by the new limit when the board manager changes it', async () => {
+      const { sub, address } = await createTestCommunity(pkc)
+      const { dir, statePath } = createTempStateDir()
+      let boardManager: BoardManagerResult | undefined
+
+      try {
+        // The sort starts without an effective limit: A is on top (A, C, B)
+        await runActivePageSort(sub, '300')
+        await waitForCommunity(sub, () => sub.pageSorts?.posts?.active?.publicOptions?.bumpLimit === '300', 'the sort to be published')
+        const { a, b, c } = await publishThreadPastBumpLimit(sub, address)
+
+        boardManager = await startBoardManager({
+          communityAddress: address,
+          pkcRpcUrl: RPC_URL,
+          boardDir: dir,
+          bumpLimit: 1,
+          perPage: 1,
+          pages: 2,
+        })
+
+        // The manager holds capacity archiving until a record generated after its edit.
+        // A quiet board only republishes on its timer, so nudge it with an edit that
+        // does not touch the thread order.
+        await waitForCommunity(sub, () => sub.settings?.pages?.posts?.[0]?.options?.bumpLimit === '1', 'the manager to set bumpLimit 1')
+        await nextSecond()
+        await nextSecond()
+        await sub.edit({ title: 'republish after the bump limit change' })
+
+        await waitForArchivedInState(statePath, a.cid)
+        await new Promise((resolve) => setTimeout(resolve, 10_000))
+
         const state = readStateFile(statePath)
-        expect(state.archivedThreads[thread.cid]).toBeDefined()
-
-        // Verify thread is actually archived in community pages
-        await waitForThreadArchived(sub, thread.cid)
+        expect(state.archivedThreads[b.cid]).toBeUndefined()
+        expect(state.archivedThreads[c.cid]).toBeUndefined()
       } finally {
         if (boardManager) await boardManager.stop()
         await sub.stop()

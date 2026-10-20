@@ -932,6 +932,325 @@ describe('board manager logic', () => {
 
   })
 
+  describe('bump order from the active sort', () => {
+    it('keeps the order of an embedded active page instead of re-sorting by lastReplyTimestamp', async () => {
+      const { instance, publishedModerations } = createMockPKC()
+      // @pkcprotocol/active-page-sort ranks a thread past the bump limit (or saged) below its
+      // latest reply: QmSunk has the newest reply but sits last in the published order.
+      const activeThreads = [
+        mockThread('QmTop', { lastReplyTimestamp: 300 }),
+        mockThread('QmSecond', { lastReplyTimestamp: 200 }),
+        mockThread('QmSunk', { lastReplyTimestamp: 900, replyCount: 400 }),
+      ]
+      const mockSub = createMockCommunity({
+        pageCids: {},
+        pages: { active: { comments: activeThreads, nextCid: undefined } as Page },
+      })
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
+
+      const boardManager = await startBoardManager({
+        communityAddress: 'board.bso', pkcRpcUrl: 'ws://localhost:9138', boardDir, perPage: 1, pages: 2, bumpLimit: 300,
+      })
+
+      await vi.waitFor(() => {
+        expect(publishedModerations).toHaveLength(1)
+      })
+      await boardManager.stop()
+
+      expect(publishedModerations.map((m) => m.commentCid)).toEqual(['QmSunk'])
+    })
+
+    it('follows nextCid from an embedded active page in published order', async () => {
+      const { instance, publishedModerations } = createMockPKC()
+      const getPage = vi.fn().mockResolvedValue({
+        comments: [mockThread('QmPage2', { lastReplyTimestamp: 999 })],
+        nextCid: undefined,
+      } as Page)
+      const mockSub = createMockCommunity({
+        pageCids: {},
+        pages: { active: { comments: [mockThread('QmPage1', { lastReplyTimestamp: 1 })], nextCid: 'QmActivePage2' } as Page },
+        getPage,
+      })
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
+
+      const boardManager = await startBoardManager({
+        communityAddress: 'board.bso', pkcRpcUrl: 'ws://localhost:9138', boardDir, perPage: 1, pages: 1,
+      })
+
+      await vi.waitFor(() => {
+        expect(publishedModerations).toHaveLength(1)
+      })
+      await boardManager.stop()
+
+      expect(getPage).toHaveBeenCalledWith({ cid: 'QmActivePage2' })
+      expect(publishedModerations.map((m) => m.commentCid)).toEqual(['QmPage2'])
+    })
+
+    it('reads the active page even when another sort is preloaded first', async () => {
+      const { instance, publishedModerations } = createMockPKC()
+      const mockSub = createMockCommunity({
+        pageCids: {},
+        pages: {
+          hot: { comments: [mockThread('QmHotOnly', { lastReplyTimestamp: 1 })], nextCid: undefined } as Page,
+          active: { comments: [mockThread('QmA'), mockThread('QmB')], nextCid: undefined } as Page,
+        },
+      })
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
+
+      const boardManager = await startBoardManager({
+        communityAddress: 'board.bso', pkcRpcUrl: 'ws://localhost:9138', boardDir, perPage: 1, pages: 1,
+      })
+
+      await vi.waitFor(() => {
+        expect(publishedModerations).toHaveLength(1)
+      })
+      await boardManager.stop()
+
+      expect(publishedModerations.map((m) => m.commentCid)).toEqual(['QmB'])
+    })
+
+    it('keeps the order of active pages fetched by CID', async () => {
+      const { instance, publishedModerations } = createMockPKC()
+      const getPage = vi.fn().mockResolvedValue({
+        comments: [mockThread('QmTop', { lastReplyTimestamp: 100 }), mockThread('QmSunk', { lastReplyTimestamp: 900, replyCount: 400 })],
+        nextCid: undefined,
+      } as Page)
+      const mockSub = createMockCommunity({ pageCids: { active: 'QmActive' }, pages: {}, getPage })
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
+
+      const boardManager = await startBoardManager({
+        communityAddress: 'board.bso', pkcRpcUrl: 'ws://localhost:9138', boardDir, perPage: 1, pages: 1, bumpLimit: 300,
+      })
+
+      await vi.waitFor(() => {
+        expect(publishedModerations).toHaveLength(1)
+      })
+      await boardManager.stop()
+
+      expect(publishedModerations.map((m) => m.commentCid)).toEqual(['QmSunk'])
+    })
+  })
+
+  describe('bump limit in the page sort', () => {
+    const CHALLENGES = [{ name: 'fail', options: { error: 'no' } }]
+
+    function settingsWithSort(options: Record<string, string>) {
+      return {
+        fetchThumbnailUrls: true,
+        challenges: CHALLENGES,
+        pages: {
+          posts: [{ name: '@pkcprotocol/active-page-sort', options, preloaded: true }],
+          replies: [{ name: 'old', preloaded: true }, { name: 'new' }],
+        },
+      }
+    }
+
+    function startLocalBoard(instance: PKCInstance, settings: unknown, bumpLimit?: number) {
+      ;(instance as unknown as { communities: string[] }).communities = ['board.bso']
+      const mockSub = Object.assign(
+        createMockCommunity({
+          pageCids: {},
+          // One thread past capacity, so a moderation marks the end of each update pass
+          pages: { active: { comments: [mockThread('QmKeep'), mockThread('QmOverflow')], nextCid: undefined } as Page },
+        }),
+        { settings },
+      )
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
+      const boardManagerPromise = startBoardManager({
+        communityAddress: 'board.bso', pkcRpcUrl: 'ws://localhost:9138', boardDir, perPage: 1, pages: 1, bumpLimit,
+      })
+      return { mockSub, boardManagerPromise }
+    }
+
+    it('writes the configured bump limit into the sort, keeping the other settings', async () => {
+      const { instance, publishedModerations } = createMockPKC()
+      const { mockSub, boardManagerPromise } = startLocalBoard(instance, settingsWithSort({ noBumpKeywords: 'sage', bumpLimit: '300' }), 500)
+      const boardManager = await boardManagerPromise
+
+      await vi.waitFor(() => {
+        expect(mockSub.edit).toHaveBeenCalledOnce()
+      })
+      await boardManager.stop()
+
+      // Archiving waits for pages sorted with the new limit
+      expect(publishedModerations).toHaveLength(0)
+      expect(mockSub.edit).toHaveBeenCalledWith({
+        settings: {
+          fetchThumbnailUrls: true,
+          challenges: CHALLENGES,
+          pages: {
+            posts: [{ name: '@pkcprotocol/active-page-sort', options: { noBumpKeywords: 'sage', bumpLimit: '500' }, preloaded: true }],
+            replies: [{ name: 'old', preloaded: true }, { name: 'new' }],
+          },
+        },
+      })
+    })
+
+    it('adds the bump limit when the sort has none, using the default of 300', async () => {
+      const { instance, publishedModerations } = createMockPKC()
+      const { mockSub, boardManagerPromise } = startLocalBoard(instance, settingsWithSort({ noBumpKeywords: 'sage' }))
+      const boardManager = await boardManagerPromise
+
+      await vi.waitFor(() => {
+        expect(mockSub.edit).toHaveBeenCalledOnce()
+      })
+      await boardManager.stop()
+
+      expect(publishedModerations).toHaveLength(0)
+      const edited = vi.mocked(mockSub.edit).mock.calls[0][0] as { settings: ReturnType<typeof settingsWithSort> }
+      expect(edited.settings.pages.posts[0].options).toEqual({ noBumpKeywords: 'sage', bumpLimit: '300' })
+    })
+
+    it('does not edit the board when the sort already has the configured limit', async () => {
+      const { instance, publishedModerations } = createMockPKC()
+      const { mockSub, boardManagerPromise } = startLocalBoard(instance, settingsWithSort({ noBumpKeywords: 'sage', bumpLimit: '300' }), 300)
+      const boardManager = await boardManagerPromise
+
+      await vi.waitFor(() => {
+        expect(publishedModerations).toHaveLength(1)
+      })
+      await boardManager.stop()
+
+      expect(mockSub.edit).not.toHaveBeenCalled()
+    })
+
+    it('does not edit a board that does not run the sort', async () => {
+      const { instance, publishedModerations } = createMockPKC()
+      const { mockSub, boardManagerPromise } = startLocalBoard(instance, {
+        challenges: CHALLENGES,
+        pages: { posts: [{ path: '/somewhere/active-page-sort/dist/index.js', options: { bumpLimit: '300' }, preloaded: true }] },
+      }, 500)
+      const boardManager = await boardManagerPromise
+
+      await vi.waitFor(() => {
+        expect(publishedModerations).toHaveLength(1)
+      })
+      await boardManager.stop()
+
+      expect(mockSub.edit).not.toHaveBeenCalled()
+    })
+
+    it('checks only once per start', async () => {
+      const { instance, publishedModerations } = createMockPKC()
+      const { mockSub, boardManagerPromise } = startLocalBoard(instance, settingsWithSort({ bumpLimit: '300' }), 500)
+      const boardManager = await boardManagerPromise
+
+      await vi.waitFor(() => {
+        expect(mockSub.edit).toHaveBeenCalledOnce()
+      })
+      // A record generated after the edit lets archiving run
+      Object.assign(mockSub, { updatedAt: Math.floor(Date.now() / 1000) + 60 })
+      mockSub._triggerUpdate()
+      await vi.waitFor(() => {
+        expect(publishedModerations).toHaveLength(1)
+      })
+      // The mock keeps the old settings, so a second check would edit again
+      mockSub.posts.pages = { active: { comments: [mockThread('QmKeep'), mockThread('QmOverflow2')], nextCid: undefined } as Page }
+      mockSub._triggerUpdate()
+      await vi.waitFor(() => {
+        expect(publishedModerations).toHaveLength(2)
+      })
+      await boardManager.stop()
+
+      expect(mockSub.edit).toHaveBeenCalledOnce()
+    })
+
+    it('waits for a hosted board to load its settings before checking', async () => {
+      const { instance, publishedModerations } = createMockPKC()
+      const { mockSub, boardManagerPromise } = startLocalBoard(instance, undefined, 500)
+      const boardManager = await boardManagerPromise
+
+      await vi.waitFor(() => {
+        expect(publishedModerations).toHaveLength(1)
+      })
+      expect(mockSub.edit).not.toHaveBeenCalled()
+
+      Object.assign(mockSub, { settings: settingsWithSort({ bumpLimit: '300' }) })
+      mockSub._triggerUpdate()
+      await vi.waitFor(() => {
+        expect(mockSub.edit).toHaveBeenCalledOnce()
+      })
+      await boardManager.stop()
+    })
+
+    it('keeps moderating when the edit fails', async () => {
+      const { instance, publishedModerations } = createMockPKC()
+      const { mockSub, boardManagerPromise } = startLocalBoard(instance, settingsWithSort({ bumpLimit: '300' }), 500)
+      vi.mocked(mockSub.edit).mockRejectedValueOnce(new Error('ERR_PAGE_SORT_SETTINGS_VALIDATION_FAILED'))
+      const boardManager = await boardManagerPromise
+
+      await vi.waitFor(() => {
+        expect(publishedModerations).toHaveLength(1)
+      })
+      await boardManager.stop()
+
+      expect(mockSub.edit).toHaveBeenCalledOnce()
+      expect(publishedModerations[0].commentCid).toBe('QmOverflow')
+    })
+
+    it('holds capacity archiving until the board publishes pages sorted with the new limit', async () => {
+      const { instance, publishedModerations } = createMockPKC()
+      const editedAt = Math.floor(Date.now() / 1000)
+      const { mockSub, boardManagerPromise } = startLocalBoard(instance, settingsWithSort({ bumpLimit: '300' }), 500)
+      // The record that was current when the manager edited the sort, still ordered by the old limit
+      Object.assign(mockSub, { updatedAt: editedAt })
+      const boardManager = await boardManagerPromise
+
+      await vi.waitFor(() => {
+        expect(mockSub.edit).toHaveBeenCalledOnce()
+      })
+      // Another update carrying the same, pre-edit record
+      mockSub._triggerUpdate()
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(publishedModerations).toHaveLength(0)
+
+      // The next record may come from a publish cycle that was already running at the edit
+      Object.assign(mockSub, { updatedAt: editedAt + 1 })
+      mockSub._triggerUpdate()
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(publishedModerations).toHaveLength(0)
+
+      // A record generated after the edit
+      Object.assign(mockSub, { updatedAt: editedAt + 60 })
+      mockSub._triggerUpdate()
+      await vi.waitFor(() => {
+        expect(publishedModerations).toHaveLength(1)
+      })
+      await boardManager.stop()
+
+      expect(publishedModerations[0].commentCid).toBe('QmOverflow')
+    })
+
+    it('does not hold archiving when the sort already had the configured limit', async () => {
+      const { instance, publishedModerations } = createMockPKC()
+      const { mockSub, boardManagerPromise } = startLocalBoard(instance, settingsWithSort({ bumpLimit: '500' }), 500)
+      Object.assign(mockSub, { updatedAt: 1 })
+      const boardManager = await boardManagerPromise
+
+      await vi.waitFor(() => {
+        expect(publishedModerations).toHaveLength(1)
+      })
+      await boardManager.stop()
+    })
+
+    it('never edits a remote board', async () => {
+      const { instance, publishedModerations } = createMockPKC()
+      const { mockSub, boardManagerPromise } = startLocalBoard(instance, undefined, 500)
+      ;(instance as unknown as { communities: string[] }).communities = []
+      Object.assign(mockSub, {
+        pageSorts: { posts: { active: { name: '@pkcprotocol/active-page-sort', publicOptions: { bumpLimit: '300' } } } },
+      })
+      const boardManager = await boardManagerPromise
+
+      await vi.waitFor(() => {
+        expect(publishedModerations).toHaveLength(1)
+      })
+      await boardManager.stop()
+
+      expect(mockSub.edit).not.toHaveBeenCalled()
+    })
+  })
+
   describe('update serialization', () => {
     it('serializes concurrent update events', async () => {
       const { instance } = createMockPKC()
@@ -1402,41 +1721,34 @@ describe('board manager logic', () => {
       await boardManager.stop()
     })
 
-    it('passes correct reason for bump-limit archive', async () => {
+    it('does not archive a thread at the bump limit', async () => {
       const { instance, publishedModerations } = createMockPKC()
-      const threads = [
-        mockThread('QmBump', { replyCount: 300 }),
-      ]
-      const getPage = vi.fn().mockResolvedValue({
-        comments: threads,
-        nextCid: undefined,
-      } as Page)
+      const threads = [mockThread('QmBump', { replyCount: 300 }), mockThread('QmOverflow')]
+      const getPage = vi.fn().mockResolvedValue({ comments: threads, nextCid: undefined } as Page)
 
-      const mockSub = createMockCommunity({
-        pageCids: { active: 'QmPage1' },
-        pages: {},
-        getPage,
-      })
+      const mockSub = createMockCommunity({ pageCids: { active: 'QmPage1' }, pages: {}, getPage })
       vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
 
       const boardManager = await startBoardManager({
         communityAddress: 'board.bso',
         pkcRpcUrl: 'ws://localhost:9138',
         boardDir: boardDir,
-        perPage: 15,
-        pages: 10,
+        perPage: 1,
+        pages: 1,
         bumpLimit: 300,
+        // Deprecated and ignored: kept in old configs, never used for a moderation
+        moderationReasons: { archiveBumpLimit: 'old bump-limit archive reason' },
       })
 
       await vi.waitFor(() => {
         expect(publishedModerations).toHaveLength(1)
       })
-
-      expect(publishedModerations[0].commentModeration).toEqual({
-        archived: true,
-        reason: '5chan board manager: thread archived — reached bump limit',
-      })
       await boardManager.stop()
+
+      // Only the thread past capacity is archived; the one at the bump limit stays open
+      expect(publishedModerations.map((m) => [m.commentCid, m.commentModeration])).toEqual([
+        ['QmOverflow', { archived: true, reason: '5chan board manager: thread archived — exceeded board capacity' }],
+      ])
     })
 
     it('passes purge reason for archived thread purge', async () => {
@@ -1563,42 +1875,36 @@ describe('board manager logic', () => {
       expect(loadState(join(boardDir, 'state.json')).archivedThreads).toEqual({})
     })
 
-    it('locks threads at the bump limit instead of archiving them', async () => {
+    it('does not lock threads at the bump limit', async () => {
       const { instance, publishedModerations } = createMockPKC()
       const threads = [
         mockThread('QmBumped', { replyCount: 300 }),
-        mockThread('QmAlreadyLocked', { replyCount: 300, locked: true }),
         mockThread('QmActive', { replyCount: 10 }),
+        mockThread('QmOverflow'),
       ]
       const getPage = vi.fn().mockResolvedValue({ comments: threads, nextCid: undefined } as Page)
 
-      const { boardManager } = await startNoArchiveBoard(instance, getPage, { perPage: 15, pages: 10, bumpLimit: 300 })
+      const { boardManager } = await startNoArchiveBoard(instance, getPage, { perPage: 2, pages: 1, bumpLimit: 300 })
 
       await vi.waitFor(() => {
         expect(publishedModerations).toHaveLength(1)
       })
       await boardManager.stop()
 
-      expect(publishedModerations[0].commentCid).toBe('QmBumped')
-      expect(publishedModerations[0].commentModeration).toEqual({
-        locked: true,
-        reason: '5chan board manager: thread locked — reached bump limit',
-      })
-      expect(loadState(join(boardDir, 'state.json')).archivedThreads).toEqual({})
+      expect(publishedModerations.map((m) => [m.commentCid, m.commentModeration])).toEqual([
+        ['QmOverflow', { purged: true, reason: '5chan board manager: thread purged — exceeded board capacity' }],
+      ])
     })
 
-    it('does not republish a lock or purge before the board reflects it', async () => {
+    it('does not republish a purge before the board reflects it', async () => {
       const { instance, publishedModerations } = createMockPKC()
-      const threads = [
-        mockThread('QmBumped', { replyCount: 300 }),
-        mockThread('QmOverflow'),
-      ]
+      const threads = [mockThread('QmKeep'), mockThread('QmOverflow')]
       const getPage = vi.fn().mockResolvedValue({ comments: threads, nextCid: undefined } as Page)
 
-      const { boardManager, mockSub } = await startNoArchiveBoard(instance, getPage, { perPage: 1, pages: 1, bumpLimit: 300 })
+      const { boardManager, mockSub } = await startNoArchiveBoard(instance, getPage, { perPage: 1, pages: 1 })
 
       await vi.waitFor(() => {
-        expect(publishedModerations).toHaveLength(2)
+        expect(publishedModerations).toHaveLength(1)
       })
       mockSub._triggerUpdate()
       await vi.waitFor(() => {
@@ -1606,31 +1912,31 @@ describe('board manager logic', () => {
       })
       await boardManager.stop()
 
-      expect(publishedModerations.map((m) => [m.commentCid, m.commentModeration.locked ?? false, m.commentModeration.purged ?? false])).toEqual([
-        ['QmOverflow', false, true],
-        ['QmBumped', true, false],
+      expect(publishedModerations.map((m) => [m.commentCid, m.commentModeration.purged ?? false])).toEqual([
+        ['QmOverflow', true],
       ])
     })
 
-    it('purges a locked thread once it falls past capacity', async () => {
+    it('purges a thread past the bump limit once it sinks past capacity', async () => {
       const { instance, publishedModerations } = createMockPKC()
+      // The sort ranks the thread past the bump limit below a newer thread, so it sinks
       const getPage = vi.fn()
         .mockResolvedValueOnce({ comments: [mockThread('QmBumped', { replyCount: 300 })], nextCid: undefined } as Page)
-        .mockResolvedValue({ comments: [mockThread('QmNew'), mockThread('QmBumped', { replyCount: 300, locked: true })], nextCid: undefined } as Page)
+        .mockResolvedValue({ comments: [mockThread('QmNew'), mockThread('QmBumped', { replyCount: 301 })], nextCid: undefined } as Page)
 
       const { boardManager, mockSub } = await startNoArchiveBoard(instance, getPage, { perPage: 1, pages: 1, bumpLimit: 300 })
 
       await vi.waitFor(() => {
-        expect(publishedModerations).toHaveLength(1)
+        expect(getPage).toHaveBeenCalledTimes(1)
       })
+      expect(publishedModerations).toHaveLength(0)
       mockSub._triggerUpdate()
       await vi.waitFor(() => {
-        expect(publishedModerations).toHaveLength(2)
+        expect(publishedModerations).toHaveLength(1)
       })
       await boardManager.stop()
 
-      expect(publishedModerations[0]).toMatchObject({ commentCid: 'QmBumped', commentModeration: { locked: true } })
-      expect(publishedModerations[1]).toMatchObject({ commentCid: 'QmBumped', commentModeration: { purged: true } })
+      expect(publishedModerations[0]).toMatchObject({ commentCid: 'QmBumped', commentModeration: { purged: true } })
     })
 
     it('purges threads archived earlier once they are past capacity', async () => {
@@ -1712,7 +2018,7 @@ describe('board manager logic', () => {
       ])
     })
 
-    it('uses custom reasons for capacity purges and bump-limit locks', async () => {
+    it('uses a custom reason for capacity purges', async () => {
       const { instance, publishedModerations } = createMockPKC()
       const threads = [mockThread('QmBumped', { replyCount: 300 }), mockThread('QmOverflow')]
       const getPage = vi.fn().mockResolvedValue({ comments: threads, nextCid: undefined } as Page)
@@ -1729,11 +2035,11 @@ describe('board manager logic', () => {
       })
 
       await vi.waitFor(() => {
-        expect(publishedModerations).toHaveLength(2)
+        expect(publishedModerations).toHaveLength(1)
       })
       await boardManager.stop()
 
-      expect(publishedModerations.map((m) => m.commentModeration.reason)).toEqual(['Custom purge', 'Custom lock'])
+      expect(publishedModerations.map((m) => [m.commentCid, m.commentModeration.reason])).toEqual([['QmOverflow', 'Custom purge']])
     })
   })
 

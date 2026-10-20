@@ -12,10 +12,12 @@ type ParseCommunityEditOptionsFn = (editOptions: CommunityEditOptions) => Commun
 
 export const ModerationReasonsSchema = z.object({
   archiveCapacity: z.string().optional(),
+  /** @deprecated Ignored; kept so older presets still load. */
   archiveBumpLimit: z.string().optional(),
   purgeArchived: z.string().optional(),
   purgeDeleted: z.string().optional(),
   purgeCapacity: z.string().optional(),
+  /** @deprecated Ignored; kept so older presets still load. */
   lockBumpLimit: z.string().optional(),
 }).strict()
 
@@ -252,6 +254,13 @@ export function buildCommunityDefaultsPatch(
   const boardSettings = preset.boardSettings as Record<string, unknown>
   const patch = buildMissingObjectPatch(community, boardSettings)
   const changedFields = patch ? Object.keys(patch) : []
+
+  // pkc-js replaces `settings` wholesale on edit, so a patch that only adds a
+  // missing key (e.g. `pages`) would wipe the board's challenges. Send the
+  // board's current settings along with the missing keys.
+  if (patch?.settings !== undefined && isPlainObject(community.settings)) {
+    patch.settings = { ...community.settings, ...(patch.settings as Record<string, unknown>) }
+  }
 
   return {
     patch: patch ? (patch as CommunityEditOptions) : undefined,

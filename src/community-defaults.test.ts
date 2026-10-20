@@ -301,6 +301,30 @@ describe('pkc-js schema-util resolution', () => {
     expect(preset.boardManagerSettings.perPage).toBe(15)
   })
 
+  it('ships the 5chan page sorts with the bump limit in active-page-sort', async () => {
+    const preset = await loadCommunityDefaultsPreset()
+    const pages = preset.boardSettings.settings?.pages
+
+    // Posts: only the bump order; the "new" sort is dropped now that 5chan derives
+    // "creation date" locally (5chan-board-manager#16)
+    expect(pages?.posts).toEqual([
+      {
+        name: '@pkcprotocol/active-page-sort',
+        options: { noBumpKeywords: 'sage', bumpLimit: '300' },
+        preloaded: true,
+      },
+    ])
+    // Replies: the "old"/"new" keys 5chan requests, not oldFlat/newFlat
+    expect(pages?.replies).toEqual([{ name: 'old', preloaded: true }, { name: 'new' }])
+    expect(pages?.posts?.[0].options?.bumpLimit).toBe(String(preset.boardManagerSettings.bumpLimit))
+  })
+
+  it('ships no reasons for archiving or locking at the bump limit', async () => {
+    const preset = await loadCommunityDefaultsPreset()
+    expect(preset.boardManagerSettings.moderationReasons).not.toHaveProperty('archiveBumpLimit')
+    expect(preset.boardManagerSettings.moderationReasons).not.toHaveProperty('lockBumpLimit')
+  })
+
   // pkc-js 0.0.101 renamed exclude.role to exclude.roles and rejects the old key
   // (ERR_CHALLENGE_EXCLUDE_ROLE_FIELD_RENAMED), which fails `board add --apply-defaults`
   // on those nodes. The installed pkc-js predates the rename and accepts either key,
@@ -390,6 +414,39 @@ describe('buildCommunityDefaultsPatch', () => {
       features: { noDownvotes: true },
       settings: { challenges: [{ name: 'captcha-v2' }], fetchThumbnailUrls: false },
     })
+  })
+})
+
+describe('buildCommunityDefaultsPatch settings', () => {
+  // pkc-js replaces settings wholesale on edit, so a patch adding only `pages`
+  // would wipe the board's challenges and other settings
+  it('sends the board\'s current settings along with a missing settings key', () => {
+    const challenges = [{ name: 'fail', options: { error: 'no' } }]
+    const community = createMockCommunity({
+      settings: { challenges, fetchThumbnailUrls: true, fetchThumbnailUrlsProxyUrl: 'https://proxy.example' },
+    })
+    const pages = { posts: [{ name: '@pkcprotocol/active-page-sort', preloaded: true }] }
+
+    const { patch, changedFields } = buildCommunityDefaultsPatch(community, {
+      boardSettings: { settings: { challenges, fetchThumbnailUrls: true, pages } },
+      boardManagerSettings: {},
+    })
+
+    expect(changedFields).toEqual(['settings'])
+    expect(patch).toEqual({
+      settings: { challenges, fetchThumbnailUrls: true, fetchThumbnailUrlsProxyUrl: 'https://proxy.example', pages },
+    })
+  })
+
+  it('leaves settings out of the patch when nothing in them is missing', () => {
+    const community = createMockCommunity({ features: {}, settings: { fetchThumbnailUrls: true } })
+
+    const { patch } = buildCommunityDefaultsPatch(community, {
+      boardSettings: { features: { noUpvotes: true }, settings: { fetchThumbnailUrls: false } },
+      boardManagerSettings: {},
+    })
+
+    expect(patch).toEqual({ features: { noUpvotes: true } })
   })
 })
 

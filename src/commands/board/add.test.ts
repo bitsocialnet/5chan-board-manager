@@ -32,7 +32,7 @@ import {
   loadCommunityDefaultsPreset,
 } from '../../community-defaults.js'
 import type { CommunityDefaultsPreset } from '../../community-defaults.js'
-import { loadConfig } from '../../config-manager.js'
+import { loadConfig, saveGlobalConfig } from '../../config-manager.js'
 import BoardAdd from './add.js'
 
 const mockValidate = vi.mocked(validateBoardAddress)
@@ -275,6 +275,50 @@ describe('board add command', () => {
     const dir = tmpDir()
     await runCommand(['board.bso', '--apply-defaults'], dir, { interactive: false })
     expect(mockApplyDefaults).toHaveBeenCalledOnce()
+  })
+
+  describe('bump limit in the page sort', () => {
+    function presetWithSort(bumpLimit?: number): CommunityDefaultsPreset {
+      return {
+        boardSettings: {
+          settings: {
+            pages: { posts: [{ name: '@pkcprotocol/active-page-sort', options: { noBumpKeywords: 'sage', bumpLimit: '300' }, preloaded: true }] },
+          },
+        },
+        boardManagerSettings: bumpLimit === undefined ? {} : { bumpLimit },
+      }
+    }
+
+    function appliedSortOptions(): Record<string, string> | undefined {
+      const applied = mockApplyDefaults.mock.calls[0][2]
+      return applied.boardSettings.settings?.pages?.posts?.[0].options
+    }
+
+    it('applies the --bump-limit value instead of the preset\'s literal one', async () => {
+      const dir = tmpDir()
+      mockGetPreset.mockResolvedValue(presetWithSort(300))
+      await runCommand(['board.bso', '--apply-defaults', '--bump-limit', '500'], dir, { interactive: false })
+
+      expect(appliedSortOptions()).toEqual({ noBumpKeywords: 'sage', bumpLimit: '500' })
+      expect(loadConfig(dir).boards[0].bumpLimit).toBe(500)
+    })
+
+    it('applies the preset\'s boardManagerSettings.bumpLimit', async () => {
+      const dir = tmpDir()
+      mockGetPreset.mockResolvedValue(presetWithSort(250))
+      await runCommand(['board.bso', '--apply-defaults'], dir, { interactive: false })
+
+      expect(appliedSortOptions()).toEqual({ noBumpKeywords: 'sage', bumpLimit: '250' })
+    })
+
+    it('falls back to the global default bump limit when the preset sets none', async () => {
+      const dir = tmpDir()
+      saveGlobalConfig(dir, { defaults: { bumpLimit: 400 } })
+      mockGetPreset.mockResolvedValue(presetWithSort())
+      await runCommand(['board.bso', '--apply-defaults'], dir, { interactive: false })
+
+      expect(appliedSortOptions()).toEqual({ noBumpKeywords: 'sage', bumpLimit: '400' })
+    })
   })
 
   it('skips defaults when interactive prompt returns skip', async () => {

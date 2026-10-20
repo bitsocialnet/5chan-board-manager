@@ -13,6 +13,12 @@
 # Otherwise remove both spam-blocker entries from your preset (they are marked
 # optional in the file) or pass --skip-apply-defaults.
 #
+# The preset also names the bump-order page sort in settings.pages. Install it on
+# the bitsocial-cli instance (0.19.107 or newer) as well:
+#   bitsocial page-sort install @pkcprotocol/active-page-sort@0.0.7
+# Otherwise remove its settings.pages.posts entry from your preset (the board then
+# has no bump limit and no sage) or pass --skip-apply-defaults.
+#
 # The preset also contains a disabled wordfilter example. Before enabling it,
 # install the challenge on the external bitsocial-cli instance:
 #   bitsocial challenge install @bitsocial/wordfilter-challenge@0.3.0

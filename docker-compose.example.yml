@@ -6,6 +6,9 @@
 #   # Install the spam-blocker challenge referenced by the default preset
 #   # (without it, `5chan board add --apply-defaults` is rejected by the RPC server):
 #   docker compose exec bitsocial bitsocial challenge install @bitsocial/spam-blocker-challenge
+#   # Install the bump-order page sort the default preset names in settings.pages
+#   # (without it, `5chan board add --apply-defaults` is rejected by the RPC server):
+#   docker compose exec bitsocial bitsocial page-sort install @pkcprotocol/active-page-sort@0.0.7
 #   # Optional: install this before enabling the commented wordfilter preset example:
 #   docker compose exec bitsocial bitsocial challenge install @bitsocial/wordfilter-challenge@0.3.0
 #   # Now add boards via 5chan board add (see README.md)
@@ -15,7 +18,8 @@
 
 services:
   bitsocial:
-    image: ghcr.io/bitsocialnet/bitsocial-cli:latest
+    # Pinned: the default preset needs `bitsocial page-sort` (bitsocial-cli 0.19.107 or newer)
+    image: ghcr.io/bitsocialnet/bitsocial-cli:0.19.108
     container_name: 5chan-bitsocial-cli
     restart: unless-stopped
     ports:

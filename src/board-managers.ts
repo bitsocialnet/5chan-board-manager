@@ -334,10 +334,8 @@ function boardConfigChanged(a: MultiBoardConfig['boards'][number], b: MultiBoard
     a.bumpLimit !== b.bumpLimit ||
     a.archivePurgeSeconds !== b.archivePurgeSeconds ||
     a.moderationReasons?.archiveCapacity !== b.moderationReasons?.archiveCapacity ||
-    a.moderationReasons?.archiveBumpLimit !== b.moderationReasons?.archiveBumpLimit ||
     a.moderationReasons?.purgeArchived !== b.moderationReasons?.purgeArchived ||
     a.moderationReasons?.purgeDeleted !== b.moderationReasons?.purgeDeleted ||
-    a.moderationReasons?.purgeCapacity !== b.moderationReasons?.purgeCapacity ||
-    a.moderationReasons?.lockBumpLimit !== b.moderationReasons?.lockBumpLimit
+    a.moderationReasons?.purgeCapacity !== b.moderationReasons?.purgeCapacity
   )
 }

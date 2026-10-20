@@ -3,23 +3,26 @@ import Logger from '@pkcprotocol/pkc-logger'
 import { closeSync, openSync, utimesSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { loadState, saveState, acquireLock } from './state.js'
-import type { BoardManagerOptions, BoardManagerResult, BoardManagerState, Comment, FileLock, ModerationReasons, Community, Signer, ThreadComment, Page, PKCInstance } from './types.js'
+import { DEFAULT_BUMP_LIMIT } from './defaults.js'
+import { ACTIVE_PAGE_SORT_NAME, runsActivePageSort, withActivePageSortBumpLimit } from './page-sorts.js'
+import type { BoardManagerOptions, BoardManagerResult, BoardManagerState, Comment, DeprecatedModerationReason, FileLock, ModerationReasons, Community, Signer, ThreadComment, Page, PKCInstance } from './types.js'
 
 const log = Logger('bitsocial:5chan-board-manager:archiver')
+
+/** Read from old configs but ignored: the bump limit is applied by the page sort now. */
+const DEPRECATED_MODERATION_REASONS: readonly DeprecatedModerationReason[] = ['archiveBumpLimit', 'lockBumpLimit']
 
 const DEFAULTS = {
   perPage: 15,
   pages: 10,
-  bumpLimit: 300,
+  bumpLimit: DEFAULT_BUMP_LIMIT,
   archivePurgeSeconds: 172800,
   purgeSweepIntervalMs: 60_000,
   moderationReasons: {
     archiveCapacity: '5chan board manager: thread archived — exceeded board capacity',
-    archiveBumpLimit: '5chan board manager: thread archived — reached bump limit',
     purgeArchived: '5chan board manager: thread purged — archive retention expired',
     purgeDeleted: '5chan board manager: content purged — author-deleted',
     purgeCapacity: '5chan board manager: thread purged — exceeded board capacity',
-    lockBumpLimit: '5chan board manager: thread locked — reached bump limit',
   },
 } as const
 
@@ -76,13 +79,16 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
 
   let communityAddress = options.communityAddress
 
-  const moderationReasons: Required<ModerationReasons> = {
+  const moderationReasons: Required<Omit<ModerationReasons, DeprecatedModerationReason>> = {
     archiveCapacity: options.moderationReasons?.archiveCapacity ?? DEFAULTS.moderationReasons.archiveCapacity,
-    archiveBumpLimit: options.moderationReasons?.archiveBumpLimit ?? DEFAULTS.moderationReasons.archiveBumpLimit,
     purgeArchived: options.moderationReasons?.purgeArchived ?? DEFAULTS.moderationReasons.purgeArchived,
     purgeDeleted: options.moderationReasons?.purgeDeleted ?? DEFAULTS.moderationReasons.purgeDeleted,
     purgeCapacity: options.moderationReasons?.purgeCapacity ?? DEFAULTS.moderationReasons.purgeCapacity,
-    lockBumpLimit: options.moderationReasons?.lockBumpLimit ?? DEFAULTS.moderationReasons.lockBumpLimit,
+  }
+  for (const key of DEPRECATED_MODERATION_REASONS) {
+    if (options.moderationReasons?.[key] !== undefined) {
+      log.error(`moderationReasons.${key} is deprecated and ignored for ${options.communityAddress}: threads at the bump limit are no longer archived or locked, they sink in ${ACTIVE_PAGE_SORT_NAME}'s bump order`)
+    }
   }
 
   const maxThreads = perPage * pages
@@ -100,10 +106,20 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
   let stopped = false
   let boardHadNoArchive = false
 
-  // Locks and purges published on a board without an archive leave no state entry, so these
-  // keep the next update from republishing them before the board's pages reflect the change.
+  // Purges published on a board without an archive leave no state entry, so this keeps
+  // the next update from republishing them before the board's pages reflect the change.
   const noArchivePurgedThreads = new Set<string>()
-  const noArchiveLockedThreads = new Set<string>()
+  // The bump limit lives in the board's page sort; checked against it once per start.
+  let bumpLimitSyncPending = true
+  // Set after this manager changed the sort's limit: capacity archiving waits for a record whose
+  // `updatedAt` is past this. Until the board publishes a record generated after the edit, its
+  // pages are still ordered by the old limit, so archiving by them would take the wrong threads.
+  // `pageSorts` is no signal (pkc-js updates it on edit, before the pages are regenerated), and
+  // `updatedAt` is not wall-clock time (it stays strictly increasing, so rapid publishes run it
+  // ahead of the clock). Publish cycles do not overlap, so a record stamped past both the record
+  // current at the edit and the edit's own second, plus one for a cycle already in flight, was
+  // generated after the edit.
+  let holdArchivingUntilUpdatedAt: number | undefined
 
   log(`starting board manager for ${communityAddress} (capacity=${maxThreads}, bumpLimit=${bumpLimit}, purgeAfter=${archivePurgeSeconds}s)`)
 
@@ -230,17 +246,6 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
     saveState(statePath, state)
   }
 
-  async function lockThread(commentCid: string, signer: Signer, reason: string): Promise<void> {
-    log(`locking thread ${commentCid} (${reason})`)
-    const mod = await pkc.createCommentModeration({
-      commentCid,
-      commentModeration: { locked: true, reason },
-      communityAddress,
-      signer,
-    })
-    await mod.publish()
-  }
-
   async function purgeDeletedComment(commentCid: string, signer: Signer, reason: string): Promise<void> {
     log(`purging author-deleted comment ${commentCid}`)
     const mod = await pkc.createCommentModeration({
@@ -348,31 +353,76 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
     return deletedCids
   }
 
+  /**
+   * Make the board's `@pkcprotocol/active-page-sort` entry carry the configured bump limit.
+   *
+   * The sort applies the limit (past it a thread stays open but sinks), so the manager's
+   * `bumpLimit` only takes effect through the sort's `bumpLimit` option. The manager config
+   * is the source of truth: a limit edited on the sort by hand is put back on the next start.
+   * Runs once per start, on the first update that carries the board's settings.
+   */
+  async function syncBumpLimit(community: Community): Promise<void> {
+    if (!bumpLimitSyncPending) return
+    const settings = community.settings
+    if (settings === undefined) {
+      // A board hosted by this RPC server loads its settings with its first updates; a remote
+      // board never shares them, so only its published sort can be checked.
+      if (pkc.communities.includes(communityAddress)) return
+      bumpLimitSyncPending = false
+      const published = community.pageSorts?.posts?.active
+      if (published?.name !== ACTIVE_PAGE_SORT_NAME) {
+        log(`bumpLimit=${bumpLimit} has no effect: ${communityAddress} does not run ${ACTIVE_PAGE_SORT_NAME}`)
+      } else if (published.publicOptions?.bumpLimit !== String(bumpLimit)) {
+        log.error(`bump limit mismatch on remote board ${communityAddress}: configured ${bumpLimit}, ${ACTIVE_PAGE_SORT_NAME} has ${published.publicOptions?.bumpLimit ?? 'none'}; only the board owner can change it`)
+      }
+      return
+    }
+    bumpLimitSyncPending = false
+
+    if (!runsActivePageSort(settings)) {
+      log(`bumpLimit=${bumpLimit} has no effect: ${communityAddress} does not run ${ACTIVE_PAGE_SORT_NAME}`)
+      return
+    }
+    const updatedSettings = withActivePageSortBumpLimit(settings, bumpLimit)
+    if (!updatedSettings) return
+
+    const current = settings.pages?.posts?.find((entry) => entry.name === ACTIVE_PAGE_SORT_NAME)?.options?.bumpLimit
+    log(`setting ${ACTIVE_PAGE_SORT_NAME} bumpLimit on ${communityAddress}: ${current ?? 'none'} → ${bumpLimit}`)
+    const updatedAtBeforeEdit = community.updatedAt ?? 0
+    try {
+      await community.edit({ settings: updatedSettings })
+      holdArchivingUntilUpdatedAt = Math.max(updatedAtBeforeEdit, Math.floor(Date.now() / 1000)) + 1
+    } catch (err) {
+      log.error(`failed to set bump limit on ${communityAddress} (configured ${bumpLimit}, ${ACTIVE_PAGE_SORT_NAME} has ${current ?? 'none'}): ${err}`)
+    }
+  }
+
   async function handleUpdate(community: Community, signer: Signer): Promise<void> {
     if (stopped) return
 
-    // Scenario 3: no posts at all — nothing to archive.
-    const preloadedPage = Object.values(community.posts.pages)[0]
-    if (!community.posts.pageCids.active && !preloadedPage) {
-      return
-    }
-
-    // Build full thread list from active sort pages.
-    // The community IPFS record is capped at 1MB total. The first preloaded page
-    // is loaded into whatever space remains. If all posts fit, there's no nextCid.
-    // If they don't fit, nextCid points to additional pages to fetch.
+    // Build the full thread list in bump order. The `active` sort is preferred however it is
+    // published: embedded in the record (pages.active, with nextCid when it spans several
+    // pages) or only by CID (pageCids.active, when its first page did not fit the record).
+    // Its order is used as-is, because @pkcprotocol/active-page-sort ranks saged threads and
+    // threads past the bump limit below their latest reply; re-sorting by lastReplyTimestamp
+    // would bump them back up and capacity archiving would never reach them.
     const threads: ThreadComment[] = []
+    const activeFirstPage = community.posts.pages.active
+      ?? (community.posts.pageCids.active ? await community.posts.getPage({ cid: community.posts.pageCids.active }) : undefined)
 
-    if (community.posts.pageCids.active) {
-      // Scenario 1: pageCids.active exists — fetch active-sorted pages
-      let page: Page = await community.posts.getPage({ cid: community.posts.pageCids.active })
+    if (activeFirstPage) {
+      let page: Page = activeFirstPage
       threads.push(...page.comments)
       while (page.nextCid) {
         page = await community.posts.getPage({ cid: page.nextCid })
         threads.push(...page.comments)
       }
-    } else if (preloadedPage?.comments) {
-      // Scenario 2: no pageCids.active — collect all preloaded pages, sort by active
+    } else {
+      // No `active` sort at all, e.g. a board without settings.pages whose posts fit the
+      // single-chunk shortcut, so only the preloaded `hot` page is published. Rebuild bump
+      // order from whichever page is preloaded.
+      const preloadedPage = Object.values(community.posts.pages)[0]
+      if (!preloadedPage) return // no posts at all — nothing to archive
       threads.push(...preloadedPage.comments)
       let nextCid = preloadedPage.nextCid
       while (nextCid) {
@@ -388,27 +438,32 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
     }
 
     // A board with features.noArchive has no archive, like 4chan /b/: threads that fall
-    // past capacity are purged right away, and threads at the bump limit are locked so they
-    // stop being bumped and sink off the board.
+    // past capacity are purged right away instead of archived.
     const boardHasNoArchive = community.features?.noArchive === true
     if (boardHasNoArchive !== boardHadNoArchive) {
       log(boardHasNoArchive
-        ? `${communityAddress} has no archive: purging threads past capacity and locking threads at the bump limit`
-        : `${communityAddress} has an archive again: archiving threads past capacity or at the bump limit`)
+        ? `${communityAddress} has no archive: purging threads past capacity`
+        : `${communityAddress} has an archive again: archiving threads past capacity`)
       boardHadNoArchive = boardHasNoArchive
     }
     const threadCids = new Set(threads.map((thread) => thread.cid))
-    for (const pendingThreads of [noArchivePurgedThreads, noArchiveLockedThreads]) {
-      for (const cid of pendingThreads) {
-        if (!threadCids.has(cid)) pendingThreads.delete(cid)
-      }
+    for (const cid of noArchivePurgedThreads) {
+      if (!threadCids.has(cid)) noArchivePurgedThreads.delete(cid)
     }
 
     // Filter out pinned threads
     const nonPinned = threads.filter((t: ThreadComment) => !t.pinned)
 
+    if (holdArchivingUntilUpdatedAt !== undefined && (community.updatedAt ?? 0) > holdArchivingUntilUpdatedAt) {
+      holdArchivingUntilUpdatedAt = undefined
+    }
+    const awaitingBumpLimitPages = holdArchivingUntilUpdatedAt !== undefined
+    if (awaitingBumpLimitPages) {
+      log(`waiting for ${communityAddress} to publish pages sorted with bumpLimit ${bumpLimit} before archiving by capacity`)
+    }
+
     // Archive (or, without an archive, purge) threads beyond capacity
-    for (const thread of nonPinned.slice(maxThreads)) {
+    for (const thread of awaitingBumpLimitPages ? [] : nonPinned.slice(maxThreads)) {
       if (boardHasNoArchive) {
         // Includes threads archived earlier, by this manager or by hand: clients list no archive
         // for such a board, so an archived thread would otherwise linger out of reach
@@ -425,29 +480,6 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
       if (state.archivedThreads[thread.cid]) continue
       try {
         await archiveThread(thread.cid, signer, moderationReasons.archiveCapacity)
-      } catch (err) {
-        log.error(`failed to archive thread ${thread.cid}: ${err}`)
-      }
-    }
-
-    // Archive (or, without an archive, lock) threads past bump limit. Without an archive,
-    // threads past capacity were just purged, so only the threads still on the board count.
-    for (const thread of boardHasNoArchive ? nonPinned.slice(0, maxThreads) : nonPinned) {
-      if (thread.archived) continue
-      if (state.archivedThreads[thread.cid]) continue
-      if ((thread.replyCount ?? 0) < bumpLimit) continue
-      if (boardHasNoArchive) {
-        if (thread.locked || noArchiveLockedThreads.has(thread.cid)) continue
-        try {
-          await lockThread(thread.cid, signer, moderationReasons.lockBumpLimit)
-          noArchiveLockedThreads.add(thread.cid)
-        } catch (err) {
-          log.error(`failed to lock thread ${thread.cid}: ${err}`)
-        }
-        continue
-      }
-      try {
-        await archiveThread(thread.cid, signer, moderationReasons.archiveBumpLimit)
       } catch (err) {
         log.error(`failed to archive thread ${thread.cid}: ${err}`)
       }
@@ -528,6 +560,7 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
               log.error(`address migration failed: ${err}`)
             }
           }
+          await syncBumpLimit(community)
           const signer = await getOrCreateSigner()
           await handleUpdate(community, signer)
         })
