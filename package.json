@@ -61,6 +61,7 @@
   "devDependencies": {
     "@commitlint/cli": "20.4.1",
     "@commitlint/config-conventional": "20.4.1",
+    "@pkcprotocol/active-page-sort": "0.0.7",
     "@release-it/conventional-changelog": "10.0.5",
     "commitizen": "4.3.1",
     "cz-conventional-changelog": "3.3.0",

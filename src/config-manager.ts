@@ -255,6 +255,7 @@ function validateNumericFields(obj: Record<string, unknown>, prefix: string, con
   }
 }
 
+// archiveBumpLimit and lockBumpLimit are deprecated and ignored, but still accepted so older configs load
 const MODERATION_REASONS_KEYS = ['archiveCapacity', 'archiveBumpLimit', 'purgeArchived', 'purgeDeleted', 'purgeCapacity', 'lockBumpLimit'] as const
 
 function validateModerationReasons(obj: Record<string, unknown>, prefix: string, configPath: string): void {
@@ -277,11 +278,9 @@ function validateModerationReasons(obj: Record<string, unknown>, prefix: string,
 function moderationReasonsChanged(a: ModerationReasons | undefined, b: ModerationReasons | undefined): boolean {
   return (
     a?.archiveCapacity !== b?.archiveCapacity ||
-    a?.archiveBumpLimit !== b?.archiveBumpLimit ||
     a?.purgeArchived !== b?.purgeArchived ||
     a?.purgeDeleted !== b?.purgeDeleted ||
-    a?.purgeCapacity !== b?.purgeCapacity ||
-    a?.lockBumpLimit !== b?.lockBumpLimit
+    a?.purgeCapacity !== b?.purgeCapacity
   )
 }
 

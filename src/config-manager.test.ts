@@ -469,12 +469,22 @@ describe('diffBoards', () => {
 
   it('detects changed boards when a no-archive moderation reason changes', () => {
     const oldConfig: MultiBoardConfig = {
-      boards: [{ address: 'a.bso', moderationReasons: { lockBumpLimit: 'old lock' } }],
+      boards: [{ address: 'a.bso', moderationReasons: { purgeCapacity: 'old purge' } }],
     }
     const newConfig: MultiBoardConfig = {
-      boards: [{ address: 'a.bso', moderationReasons: { lockBumpLimit: 'new lock' } }],
+      boards: [{ address: 'a.bso', moderationReasons: { purgeCapacity: 'new purge' } }],
     }
     expect(diffBoards(oldConfig, newConfig).changed).toHaveLength(1)
+  })
+
+  it('does not restart a board when only a deprecated bump-limit reason changes', () => {
+    const oldConfig: MultiBoardConfig = {
+      boards: [{ address: 'a.bso', moderationReasons: { archiveBumpLimit: 'old archive', lockBumpLimit: 'old lock' } }],
+    }
+    const newConfig: MultiBoardConfig = {
+      boards: [{ address: 'a.bso', moderationReasons: { archiveBumpLimit: 'new archive', lockBumpLimit: 'new lock' } }],
+    }
+    expect(diffBoards(oldConfig, newConfig).changed).toHaveLength(0)
   })
 
   it('detects changed boards when a field is added', () => {

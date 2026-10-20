@@ -12,10 +12,12 @@ type ParseCommunityEditOptionsFn = (editOptions: CommunityEditOptions) => Commun
 
 export const ModerationReasonsSchema = z.object({
   archiveCapacity: z.string().optional(),
+  /** @deprecated Ignored; kept so older presets still load. */
   archiveBumpLimit: z.string().optional(),
   purgeArchived: z.string().optional(),
   purgeDeleted: z.string().optional(),
   purgeCapacity: z.string().optional(),
+  /** @deprecated Ignored; kept so older presets still load. */
   lockBumpLimit: z.string().optional(),
 }).strict()
 
@@ -200,6 +202,16 @@ export async function getCommunityDefaultsPreset(): Promise<CommunityDefaultsPre
   return communityDefaultsPresetPromise
 }
 
+/** Merge `patch` into `base`: plain objects key by key, arrays and scalars from `patch` win. */
+function mergePatch(base: Record<string, unknown>, patch: Record<string, unknown>): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...base }
+  for (const [key, value] of Object.entries(patch)) {
+    const baseValue = merged[key]
+    merged[key] = isPlainObject(value) && isPlainObject(baseValue) ? mergePatch(baseValue, value) : value
+  }
+  return merged
+}
+
 export function buildMissingObjectPatch(
   currentValue: unknown,
   defaults: Record<string, unknown>,
@@ -252,6 +264,14 @@ export function buildCommunityDefaultsPatch(
   const boardSettings = preset.boardSettings as Record<string, unknown>
   const patch = buildMissingObjectPatch(community, boardSettings)
   const changedFields = patch ? Object.keys(patch) : []
+
+  // pkc-js replaces `settings` wholesale on edit, so a patch that only adds a
+  // missing key (e.g. `pages`) would wipe the board's challenges. Send the
+  // board's current settings along with the missing keys. The patch is a nested
+  // diff (e.g. `pages: { posts }` when only posts differ), so merge it recursively.
+  if (isPlainObject(patch?.settings) && isPlainObject(community.settings)) {
+    patch.settings = mergePatch(community.settings, patch.settings)
+  }
 
   return {
     patch: patch ? (patch as CommunityEditOptions) : undefined,

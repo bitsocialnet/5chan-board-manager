@@ -18,6 +18,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import PKCRpc from '@pkcprotocol/pkc-js/rpc'
+import activePageSort from '@pkcprotocol/active-page-sort'
 import { resolveKuboBinary } from './kubo.js'
 
 const E2E_RPC_PORT = 19138
@@ -88,6 +89,8 @@ export default async function setup(): Promise<() => Promise<void>> {
       dataPath,
       kuboRpcClientsOptions: [kubo.apiUrl],
       httpRoutersOptions: [],
+      // Registered under its registry name, as `bitsocial page-sort install` does
+      pageSorts: { '@pkcprotocol/active-page-sort': activePageSort },
     },
   })
 

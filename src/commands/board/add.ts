@@ -14,6 +14,8 @@ import {
   loadCommunityDefaultsPresetRaw,
 } from '../../community-defaults.js'
 import type { CommunityDefaultsPreset } from '../../community-defaults.js'
+import { DEFAULT_BUMP_LIMIT } from '../../defaults.js'
+import { withPresetBumpLimit } from '../../page-sorts.js'
 import type { BoardConfig } from '../../types.js'
 import { flattenPreset, formatPresetDisplay, openPresetInEditor, parsePresetJsonc } from '../../preset-editor.js'
 
@@ -268,7 +270,16 @@ https://github.com/bitsocialnet/bitsocial-cli#bitsocial-community-edit-address`
 
     for (const address of addresses) {
       if (preset) {
-        const applyResult = await applyCommunityDefaultsToBoard(address, flags['rpc-url'], preset)
+        // Resolved the same way the board manager will resolve it from the saved config
+        const bumpLimit = flags['bump-limit']
+          ?? preset.boardManagerSettings.bumpLimit
+          ?? config.defaults?.bumpLimit
+          ?? DEFAULT_BUMP_LIMIT
+        const applyResult = await applyCommunityDefaultsToBoard(
+          address,
+          flags['rpc-url'],
+          withPresetBumpLimit(preset, bumpLimit),
+        )
         if (applyResult.applied) {
           this.log(
             `Applied board settings defaults (${applyResult.changedFields.join(', ')}) to "${address}"`,

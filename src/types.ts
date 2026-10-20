@@ -20,12 +20,17 @@ export type ThreadComment = Page['comments'][number]
 
 export interface ModerationReasons {
   archiveCapacity?: string
+  /** @deprecated Ignored: threads at the bump limit sink in the page sort instead of being archived. */
   archiveBumpLimit?: string
   purgeArchived?: string
   purgeDeleted?: string
   purgeCapacity?: string
+  /** @deprecated Ignored: threads at the bump limit sink in the page sort instead of being locked. */
   lockBumpLimit?: string
 }
+
+/** Moderation reasons still accepted in configs so they keep loading, but no longer used. */
+export type DeprecatedModerationReason = 'archiveBumpLimit' | 'lockBumpLimit'
 
 export interface BoardManagerOptions {
   communityAddress: string

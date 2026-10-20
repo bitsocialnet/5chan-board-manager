@@ -9,10 +9,15 @@ A CLI tool that implements 4chan-style thread auto-archiving and purging for 5ch
 - Count non-pinned threads; any beyond position `per_page × pages` → archive via `createCommentModeration({ commentModeration: { archived: true } })`
 - Archived threads are read-only (pkc-js already enforces this)
 
-### Feature 2: Bump limit
+### Feature 2: Bump limit and sage
 
-- Track reply counts for active threads
-- When a thread reaches `bump_limit` replies → archive it via `createCommentModeration({ commentModeration: { archived: true } })`
+The board's bump order comes from [`@pkcprotocol/active-page-sort`](https://github.com/pkcprotocol/active-page-sort), which the default preset installs as the board's `active` post sort (see [Page sorts](#page-sorts)):
+
+- A reply whose content has a line equal to `sage` does not bump its thread
+- Past `bump_limit` replies a thread stays **open** and keeps taking replies, but none of them bump it. It sinks, and is archived when it falls off the last page (Feature 1), as on 4chan. A `sage` reply still counts toward the limit
+- The board manager does not archive or lock threads at the bump limit. Instead it writes the board's `bumpLimit` into the sort's `bumpLimit` option: `5chan board add --apply-defaults` writes the board's own value, and each time a board manager starts it puts the configured value back if they differ (the board manager config is the source of truth). A change through `board edit --bump-limit`, `defaults set --bump-limit` or a config file restarts the board manager, which then updates the sort. After changing the limit it holds capacity archiving until the board publishes a record generated after the edit (a few publish cycles; a quiet board republishes at least every 15 minutes), because until then the pages are still ordered by the old limit
+- A board whose `settings.pages` does not name `@pkcprotocol/active-page-sort` (by registry `name`; `path:` entries are left alone) has **no bump limit**; the board manager logs that `bumpLimit` has no effect there
+- Threads archived at the bump limit by earlier versions stay archived
 
 ### Feature 3: Delayed purge
 
@@ -25,7 +30,7 @@ A CLI tool that implements 4chan-style thread auto-archiving and purging for 5ch
 A board whose community record sets `features.noArchive: true` has no archive, like 4chan's /b/ and /trash/:
 
 - Threads beyond position `per_page × pages` are purged right away via `createCommentModeration({ commentModeration: { purged: true } })` instead of archived
-- Threads that reach `bump_limit` are locked via `createCommentModeration({ commentModeration: { locked: true } })` instead of archived, so they stop being bumped and sink off the board
+- Threads past `bump_limit` are not locked: like on any other board they sink in the bump order and are purged once they fall past capacity
 - Threads archived earlier, by the board manager or by hand, are purged once they are past capacity, since clients no longer list an archive for the board. Ones the board manager archived also still expire through `archive_purge_seconds`
 - The flag is read from the community on every update, so it takes effect without restarting the board manager. pkc-js rejects archive moderations on such a board, and 5chan hides its archive
 
@@ -68,11 +73,9 @@ Config and state are stored per-board under `~/.config/5chan/`, managed via `5ch
     "archivePurgeSeconds": 172800,
     "moderationReasons": {
       "archiveCapacity": "5chan board manager: thread archived — exceeded board capacity",
-      "archiveBumpLimit": "5chan board manager: thread archived — reached bump limit",
       "purgeArchived": "5chan board manager: thread purged — archive retention expired",
       "purgeDeleted": "5chan board manager: content purged — author-deleted",
-      "purgeCapacity": "5chan board manager: thread purged — exceeded board capacity",
-      "lockBumpLimit": "5chan board manager: thread locked — reached bump limit"
+      "purgeCapacity": "5chan board manager: thread purged — exceeded board capacity"
     }
   }
 }
@@ -84,7 +87,7 @@ All fields except each board's `address` are optional:
 - `rpcUrl` — falls back to `PKC_RPC_WS_URL` env var, then `ws://localhost:9138`
 - `defaults` — applied to all boards unless overridden per-board
 - Per-board fields (`perPage`, `pages`, `bumpLimit`, `archivePurgeSeconds`, `moderationReasons`) override `defaults`
-- `moderationReasons` — optional object with `archiveCapacity`, `archiveBumpLimit`, `purgeArchived`, `purgeDeleted`, `purgeCapacity`, `lockBumpLimit` string fields (the last two apply only to boards without an archive). Per-board values override defaults per-field (not the whole object). These reason strings are passed to `createCommentModeration()` so PKC clients can display why a thread was archived or purged.
+- `moderationReasons` — optional object with `archiveCapacity`, `purgeArchived`, `purgeDeleted`, `purgeCapacity` string fields (`purgeCapacity` applies only to boards without an archive). `archiveBumpLimit` and `lockBumpLimit` are deprecated: still accepted so older configs load, but ignored (a warning is logged), since threads at the bump limit are no longer archived or locked. Per-board values override defaults per-field (not the whole object). These reason strings are passed to `createCommentModeration()` so PKC clients can display why a thread was archived or purged.
 - Board directory names must match the address field in `config.json`
 
 
@@ -93,8 +96,10 @@ All fields except each board's `address` are optional:
 
 Docker is the only supported install path. The published image
 (`ghcr.io/bitsocialnet/5chan-board-manager:latest`) is built and tested with the
-bitsocial-cli version the default preset assumes, including the
-`@bitsocial/spam-blocker-challenge` that the preset references. Running 5chan
+bitsocial-cli version the default preset assumes (pinned in the compose files;
+the preset needs bitsocial-cli **0.19.107 or newer** for `bitsocial page-sort`),
+including the `@bitsocial/spam-blocker-challenge` and `@pkcprotocol/active-page-sort`
+packages that the preset references. Running 5chan
 outside Docker — or against a bitsocial-cli you manage yourself — is possible
 but unsupported; you will have to keep the challenge and auth-key wiring in
 sync by hand (see [Standalone](#standalone-bitsocial-cli-already-running) below).
@@ -113,6 +118,11 @@ docker compose up -d
 # (skip this only if you also remove spam-blocker entries from your preset
 # or always use --skip-apply-defaults):
 docker compose exec bitsocial bitsocial challenge install @bitsocial/spam-blocker-challenge
+
+# Install the bump-order page sort referenced by the default preset
+# (skip this only if you also remove the settings.pages posts entry from your
+# preset or always use --skip-apply-defaults):
+docker compose exec bitsocial bitsocial page-sort install @pkcprotocol/active-page-sort@0.0.7
 
 # Optional: install this before enabling the wordfilter preset example
 docker compose exec bitsocial bitsocial challenge install @bitsocial/wordfilter-challenge@0.3.0
@@ -139,6 +149,9 @@ docker compose up -d
 
 # Install the spam-blocker challenge referenced by the default preset
 docker compose exec bitsocial bitsocial challenge install @bitsocial/spam-blocker-challenge
+
+# Install the bump-order page sort referenced by the default preset
+docker compose exec bitsocial bitsocial page-sort install @pkcprotocol/active-page-sort@0.0.7
 
 # Optional: install this before enabling the wordfilter preset example
 docker compose exec bitsocial bitsocial challenge install @bitsocial/wordfilter-challenge@0.3.0
@@ -180,6 +193,14 @@ bitsocial challenge install @bitsocial/spam-blocker-challenge
 ```
 
 If you do not want this dependency, remove both `@bitsocial/spam-blocker-challenge` entries from your preset (they are marked optional in the file) or use `--skip-apply-defaults`.
+
+**You must also install the bump-order page sort** (bitsocial-cli 0.19.107 or newer). The default preset names it in `settings.pages`, and the RPC server rejects `5chan board add --apply-defaults` with `ERR_RPC_CLIENT_PAGE_SORT_NAME_NOT_AVAILABLE_ON_SERVER` when it is missing:
+
+```bash
+bitsocial page-sort install @pkcprotocol/active-page-sort@0.0.7
+```
+
+Without it, remove the `@pkcprotocol/active-page-sort` entry from `settings.pages.posts` in your preset or use `--skip-apply-defaults`. The board then has no bump limit and no sage (see [Feature 2](#feature-2-bump-limit-and-sage)).
 
 The bundled preset also contains a disabled wordfilter example. If you enable
 it, install the challenge on the same bitsocial-cli instance first:
@@ -260,7 +281,7 @@ https://github.com/pkcprotocol/pkc-js?tab=readme-ov-file#communityeditcommunitye
 Bundled preset JSONC defaults:
 [`src/presets/community-defaults.jsonc`](src/presets/community-defaults.jsonc)
 
-`boardSettings` is merged into `community.edit()` with "missing only" semantics (only absent values are applied). `boardManagerSettings` is used as default values for `board add` config fields, and explicit CLI flags override these defaults.
+`boardSettings` is merged into `community.edit()` with "missing only" semantics (only absent values are applied). Because pkc-js replaces `settings` as a whole on edit, a patch that adds a missing `settings` key also sends the board's existing settings along with it, so its challenges and other settings are kept. `boardManagerSettings` is used as default values for `board add` config fields, and explicit CLI flags override these defaults.
 
 The bundled preset file is `src/presets/community-defaults.jsonc`.
 
@@ -324,6 +345,48 @@ between separate wordfilter challenges cannot be validated in isolation; they
 surface during client application or as a publication rejection. See the
 [`@bitsocial/wordfilter-challenge` contract](https://github.com/bitsocialnet/wordfilter-challenge#the-wordfilterv1-contract)
 for the complete validation and client behavior.
+
+### Page sorts
+
+The bundled preset sets `settings.pages` (configurable page sorts, pkc-js 0.0.108+) to only what 5chan reads, instead of pkc-js's nine default post sorts and five reply sorts:
+
+```jsonc
+"pages": {
+  "posts": [
+    { "name": "@pkcprotocol/active-page-sort", "options": { "noBumpKeywords": "sage", "bumpLimit": "300" }, "preloaded": true }
+  ],
+  "replies": [{ "name": "old", "preloaded": true }, { "name": "new" }]
+}
+```
+
+- **posts**: [`@pkcprotocol/active-page-sort`](https://github.com/pkcprotocol/active-page-sort) publishes the bump order under the `active` key 5chan reads (board, archive, catalog; the catalog's "reply count" and "creation date" orders are re-sorted client-side). It honours `sage` and the bump limit, see [Feature 2](#feature-2-bump-limit-and-sage). Its `bumpLimit` option is overwritten with the board's own `bumpLimit` when the preset is applied and when the board manager starts.
+- **replies**: `old` (thread view, oldest first, embedded) and `new` (board-view reply preview, fetched on demand). 5chan requests these keys and flattens them client-side, so they are not `oldFlat`/`newFlat`.
+- **Older 5chan clients**: 5chan v0.10.0 and older (desktop and Android builds not yet updated) fetch the posts `new` sort for the catalog's "creation date" option. To keep that option working for them, add `{ "name": "new" }` to `pages.posts` (not preloaded, so it costs no record bytes).
+
+Requires `bitsocial page-sort install @pkcprotocol/active-page-sort@0.0.7` on the bitsocial-cli instance (0.19.107 or newer), see [Installation](#installation).
+
+Notes for operators:
+
+- Any change to `settings.pages` makes the community regenerate every CommentUpdate once, on its next pass; after that it is back to normal.
+- Boards added before this preset have no `settings.pages`, so they keep pkc-js's default sorts and have no bump limit. The board manager never adds it on its own; add it with bitsocial-cli (below).
+- Threads archived at the bump limit by earlier versions stay archived.
+
+To add the page sorts to an existing board, install the sort (see above), then edit the community with a JSON file. `--jsonFile` merges objects into the board's current settings, so its challenges stay, and it replaces arrays as a whole. Use the board's own `bumpLimit` (the board manager corrects it on start anyway):
+
+```bash
+cat > pages.json <<'JSON'
+{
+  "settings": {
+    "pages": {
+      "posts": [{ "name": "@pkcprotocol/active-page-sort", "options": { "noBumpKeywords": "sage", "bumpLimit": "300" }, "preloaded": true }],
+      "replies": [{ "name": "old", "preloaded": true }, { "name": "new" }]
+    }
+  }
+}
+JSON
+docker compose cp pages.json bitsocial:/tmp/pages.json
+docker compose exec bitsocial bitsocial community edit <board-address> -f /tmp/pages.json
+```
 
 ## Commands
 
@@ -615,7 +678,7 @@ DESCRIPTION
 
   Board managers enforce imageboard-style thread lifecycle rules on each board:
   - Archive threads that exceed board capacity (perPage × pages)
-  - Archive threads that reach the bump limit
+  - Keep each board's @pkcprotocol/active-page-sort bump limit in sync with its bumpLimit
   - Purge archived threads after the retention period expires
   - Purge author-deleted threads and replies
 
@@ -663,7 +726,7 @@ The lock is released when the board manager stops.
 
 ## Purge Sweep
 
-Archiving is driven by `community.update` events, because it depends on board activity (new threads pushing old ones past capacity, replies hitting the bump limit). Purging is different: once a thread is archived, only the clock decides when its retention expires.
+Archiving is driven by `community.update` events, because it depends on board activity (new threads pushing old ones past capacity). Purging is different: once a thread is archived, only the clock decides when its retention expires.
 
 So the board manager also runs a periodic sweep that purges archived threads whose `archivePurgeSeconds` has elapsed, independent of update events. A board that goes quiet right after archiving would otherwise keep expired threads in the archive indefinitely, since nothing would trigger the update handler.
 
@@ -732,7 +795,8 @@ Before archiving, checks the thread's `archived` property. Skips if already arch
 Uses `pkc-logger` (same logger as the pkc-js ecosystem). Key events logged:
 
 - Board manager start/stop
-- Threads archived (with CID and reason: capacity vs bump limit)
+- Threads archived (with CID and reason)
+- Bump limit written into `@pkcprotocol/active-page-sort`, or that it has no effect on a board without the sort
 - Threads purged
 - Author-deleted comments purged
 - Config hot-reload events
@@ -820,7 +884,7 @@ Capacity examples: /b/ = 150, /v/ = 200, /f/ = 30.
 
 ### Bumping
 
-A reply moves the thread to the top of page 1. This is equivalent to PKC's **"active sort"**, which orders threads by `lastReplyTimestamp`.
+A reply moves the thread to the top of page 1. This is equivalent to PKC's **"active sort"**, which orders threads by `lastReplyTimestamp`. 5chan boards run `@pkcprotocol/active-page-sort` under the same key, which also skips `sage` replies and replies past the bump limit.
 
 ### Bump limit
 
@@ -868,12 +932,14 @@ To point the suite at an externally-running RPC instead (e.g. a long-lived docke
 PKC_RPC_WS_URL=ws://localhost:9138/YOUR-AUTH-KEY npm run test:e2e
 ```
 
+The in-process RPC server registers `@pkcprotocol/active-page-sort` (a devDependency) for the bump-limit tests; an external RPC server needs it installed (`bitsocial page-sort install @pkcprotocol/active-page-sort@0.0.7`).
+
 ## Differences from 4chan
 
 | Behavior | 4chan | This module |
 |----------|------|-------------|
-| **Bump limit** | Threads past bump limit still accept replies — they just stop rising in the catalog | Threads are **archived** (no more replies) because pkc-js has no "stop bumping without archiving" mechanism |
-| **Sage** | Replying with `sage` in the email field prevents the thread from being bumped | Not supported — PKC has no equivalent mechanism, so all replies bump the thread |
+| **Bump limit** | Threads past bump limit still accept replies — they just stop rising in the catalog | Same, applied by `@pkcprotocol/active-page-sort`. A board that does not run the sort has no bump limit |
+| **Sage** | Replying with `sage` in the email field prevents the thread from being bumped | A reply whose content has a line equal to `sage` does not bump the thread, applied by `@pkcprotocol/active-page-sort` |
 | **Image limit** | Per-thread image limit (e.g., 150 images on /b/) after which no more images can be posted | Not implemented — pkc-js has its own file-size constraints but no per-thread image count limit |
 
 ## PKC-js Implementation
@@ -885,7 +951,7 @@ External module using pkc-js's public API:
 - No pkc-js core modifications needed
 - Uses `pkc.createCommentModeration()` for both archiving and purging
 - Listens to board `update` events (via `community.on('update', ...)`) to detect new posts
-- Gets thread positions from board post feeds (`community.posts.pageCids.active`), or falls back to sorting preloaded pages by `lastReplyTimestamp` descending (then `postNumber`)
+- Gets thread positions from the board's `active` sort, embedded (`community.posts.pages.active`) or by CID (`community.posts.pageCids.active`), in published order; only a board without an `active` sort falls back to sorting its preloaded page by `lastReplyTimestamp` descending (then `postNumber`)
 
 ### Configurable settings
 
@@ -895,9 +961,9 @@ Uses 4chan field names for interoperability.
 |---------|---------|-------------|-------------|
 | `per_page` | 15 | 15–30 | Threads per index page |
 | `pages` | 10 | 1–10 | Number of index pages |
-| `bump_limit` | 300 | 300–500 | Max replies before thread is archived (locked on boards without an archive) |
+| `bump_limit` | 300 | 300–500 | Replies after which new replies stop bumping the thread; written into `@pkcprotocol/active-page-sort`'s `bumpLimit` option |
 | `archive_purge_seconds` | 172800 (48h) | ~48h | Seconds before archived posts are purged (no 4chan equivalent, 4chan uses ~48h) |
-| `moderationReasons` | (see below) | — | Reason strings passed to `createCommentModeration()`. Fields: `archiveCapacity`, `archiveBumpLimit`, `purgeArchived`, `purgeDeleted`, `purgeCapacity`, `lockBumpLimit` |
+| `moderationReasons` | (see below) | — | Reason strings passed to `createCommentModeration()`. Fields: `archiveCapacity`, `purgeArchived`, `purgeDeleted`, `purgeCapacity` (`archiveBumpLimit` and `lockBumpLimit` are deprecated and ignored) |
 
 **Max active threads** = `per_page × pages` (default: 150)
 
@@ -905,8 +971,8 @@ Uses 4chan field names for interoperability.
 
 Cannot do `community.posts.getPage("active")`. Must either:
 
-1. Use `community.posts.pageCids.active` to get the CID, then fetch that page
-2. Or fall back to sorting preloaded pages by `lastReplyTimestamp` descending, then `postNumber` (approximates active sort without needing `pageCids.active`)
+1. Use the embedded `community.posts.pages.active`, or `community.posts.pageCids.active` to get the CID and fetch that page, following `nextCid` in both cases
+2. Or, when the board publishes no `active` sort, fall back to sorting preloaded pages by `lastReplyTimestamp` descending, then `postNumber` (approximates the built-in active sort; ignores sage and the bump limit)
 
 ### Board record size constraint
 
@@ -927,10 +993,14 @@ Reference: `pkc-js/src/community/community-client-manager.ts`, `pkc-js/src/runti
 4. Check board roles via `community.roles`; if missing, call `community.edit()` to add as mod
 5. Acquire file lock to prevent concurrent board managers on same board
 6. Call `community.update()`
-7. On each 'update' event:
+7. On the first 'update' event that carries the board's settings (once per start):
+   - If `settings.pages.posts` names `@pkcprotocol/active-page-sort` and its `bumpLimit` option differs from `bump_limit`, `community.edit()` it (sending the whole settings object); log a warning and carry on if the edit fails
+   - After a successful edit, skip step (d) until an update carries a record whose `updatedAt` is more than one past both the pre-edit record's `updatedAt` and the edit time
+   - Otherwise log that `bump_limit` has no effect on this board
+8. On each 'update' event:
    a. Determine thread source (three scenarios):
-      1. pageCids.active exists → fetch via getPage(), paginate via nextCid
-      2. Only pages.hot exists → use preloaded page, sort by lastReplyTimestamp desc then postNumber
+      1. pages.active or pageCids.active exists → use it in published order, paginate via nextCid
+      2. No active sort → use the preloaded page, sort by lastReplyTimestamp desc then postNumber
       3. Neither exists → no posts, return early
    b. Walk through pages to build full ordered list of threads
    c. Filter out pinned threads
@@ -938,18 +1008,14 @@ Reference: `pkc-js/src/community/community-client-manager.ts`, `pkc-js/src/runti
       - Skip if already archived
       - createCommentModeration({ archived: true }) and publish
       - Record archivedTimestamp in state file
-   e. For each thread with replyCount >= bump_limit:
-      - Skip if already archived
-      - createCommentModeration({ archived: true }) and publish
-      - Record archivedTimestamp in state file
-   f. For each archived thread where (now - archivedAt) > archive_purge_seconds:
+   e. For each archived thread where (now - archivedAt) > archive_purge_seconds:
       - createCommentModeration({ purged: true }) and publish
       - Remove from state file
-   g. For each author-deleted comment/reply:
+   f. For each author-deleted comment/reply:
       - createCommentModeration({ purged: true }) and publish
 
-8. Every PURGE_SWEEP_INTERVAL_SECONDS, independent of update events (skipped when set to 0):
-   - Run step (f) again, so time-based purging still happens on a quiet board
+9. Every PURGE_SWEEP_INTERVAL_SECONDS, independent of update events (skipped when set to 0):
+   - Run step (e) again, so time-based purging still happens on a quiet board
 ```
 
 ### Key pkc-js APIs used

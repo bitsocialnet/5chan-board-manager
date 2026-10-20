@@ -124,6 +124,9 @@ jobs:
       - name: Install spam-blocker challenge (referenced by defaults preset)
         run: docker compose exec -T bitsocial bitsocial challenge install @bitsocial/spam-blocker-challenge
 
+      - name: Install active-page-sort (referenced by defaults preset)
+        run: docker compose exec -T bitsocial bitsocial page-sort install @pkcprotocol/active-page-sort@0.0.7
+
       - name: Create test community
         run: docker compose exec -T bitsocial bitsocial community create
 
@@ -134,10 +137,12 @@ jobs:
           echo "address=$ADDRESS" >> "$GITHUB_OUTPUT"
           echo "Community address: $ADDRESS"
 
+      # A non-default bump limit checks that apply-defaults writes the board's own
+      # limit into the page sort instead of the preset's literal "300"
       - name: Add board with defaults
         run: |
           docker compose exec -T 5chan \
-            5chan board add "${{ steps.community.outputs.address }}" --apply-defaults
+            5chan board add "${{ steps.community.outputs.address }}" --apply-defaults --bump-limit 250
 
       - name: Verify boardSettings via RPC
         run: |
@@ -158,6 +163,32 @@ jobs:
           # challenges
           echo "$COMMUNITY_JSON" | jq -e '.settings.challenges | length == 4'
 
+          # page sorts: bump order only, carrying the board's bump limit
+          echo "$COMMUNITY_JSON" | jq -e '.settings.pages.posts | length == 1'
+          echo "$COMMUNITY_JSON" | jq -e '.settings.pages.posts[0].name == "@pkcprotocol/active-page-sort"'
+          echo "$COMMUNITY_JSON" | jq -e '.settings.pages.posts[0].options == {"noBumpKeywords": "sage", "bumpLimit": "250"}'
+          echo "$COMMUNITY_JSON" | jq -e '[.settings.pages.replies[].name] == ["old", "new"]'
+
+      - name: Verify the community publishes the page sort
+        run: |
+          # pageSorts is derived by the RPC server from the loaded sort file, so this
+          # proves the installed package resolved, not just that settings were stored
+          for i in $(seq 1 12); do
+            ACTIVE=$(docker compose exec -T bitsocial \
+              bitsocial community get "${{ steps.community.outputs.address }}" | jq -c '.pageSorts.posts.active // empty')
+            if [ -n "$ACTIVE" ]; then
+              echo "$ACTIVE" | jq .
+              echo "$ACTIVE" | jq -e '.name == "@pkcprotocol/active-page-sort"'
+              echo "$ACTIVE" | jq -e '.publicOptions.noBumpKeywords == "sage"'
+              echo "$ACTIVE" | jq -e '.publicOptions.bumpLimit == "250"'
+              exit 0
+            fi
+            echo "  attempt $i/12 — pageSorts not published yet, retrying in 5s..."
+            sleep 5
+          done
+          echo "ERROR: community did not publish pageSorts.posts.active"
+          exit 1
+
       - name: Verify boardManagerSettings in config
         run: |
           BOARD_JSON=$(docker compose exec -T 5chan \
@@ -167,9 +198,9 @@ jobs:
 
           echo "$BOARD_JSON" | jq -e '.perPage == 15'
           echo "$BOARD_JSON" | jq -e '.pages == 10'
-          echo "$BOARD_JSON" | jq -e '.bumpLimit == 300'
+          echo "$BOARD_JSON" | jq -e '.bumpLimit == 250'
           echo "$BOARD_JSON" | jq -e '.archivePurgeSeconds == 172800'
-          echo "$BOARD_JSON" | jq -e '.moderationReasons | keys == ["archiveBumpLimit", "archiveCapacity", "lockBumpLimit", "purgeArchived", "purgeCapacity", "purgeDeleted"]'
+          echo "$BOARD_JSON" | jq -e '.moderationReasons | keys == ["archiveCapacity", "purgeArchived", "purgeCapacity", "purgeDeleted"]'
 
       - name: Verify board list
         run: |
@@ -219,7 +250,7 @@ jobs:
         run: |
           docker run -d --name 5chan-bitsocial-cli -p 9138:9138 \
             -e PKC_RPC_AUTH_KEY=ci-test-auth-key \
-            ghcr.io/bitsocialnet/bitsocial-cli:latest
+            ghcr.io/bitsocialnet/bitsocial-cli:0.19.108
 
       - name: Wait for bitsocial RPC
         run: |
