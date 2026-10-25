@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.34](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.33...v0.2.34) (2026-10-25)
+
+### Bug Fixes
+
+* **deps:** patch undici and zod advisories [skip github-alerts] ([ca8447b](https://github.com/bitsocialnet/5chan-board-manager/commit/ca8447b6a00a79cbade270100167a2a03347347a))
+* **deps:** restore npm 10 compatible lockfile [skip github-alerts] ([89a17d3](https://github.com/bitsocialnet/5chan-board-manager/commit/89a17d3a57df57edc4315bc7b500289b8c0d9550))
+
 ## [0.2.33](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.32...v0.2.33) (2026-10-20)
 
 ### Features
