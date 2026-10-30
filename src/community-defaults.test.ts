@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { tmpdir } from 'node:os'
 
 vi.mock('./pkc-rpc.js', () => ({
@@ -137,6 +138,26 @@ describe('community defaults preset loading', () => {
     expect(preset.boardSettings.settings?.challenges).not.toContainEqual(
       expect.objectContaining({ name: '@bitsocial/wordfilter-challenge' }),
     )
+  })
+
+  it('ships the comment.gallery features switched off, as keys the installed pkc-js declares', async () => {
+    const preset = await loadCommunityDefaultsPreset()
+    const features = preset.boardSettings.features as Record<string, unknown>
+
+    // 0 = a post or reply may carry a link but no gallery (pkcprotocol/pkc-js#457).
+    expect(features.maxPostGalleryItems).toBe(0)
+    expect(features.maxReplyGalleryItems).toBe(0)
+
+    // pkc-js's features schema is loose, so parseCommunityEditOptions accepts any key
+    // and an unknown one is stored as an inert field. Compare against the keys the
+    // schema declares, so a typo or a pkc-js too old to enforce a feature fails here.
+    const communitySchemaPath = join(dirname(resolvePkcSchemaUtilPath()), '..', 'community', 'schema.js')
+    const { CommunityFeaturesSchema } = await import(pathToFileURL(communitySchemaPath).href) as {
+      CommunityFeaturesSchema: { shape: Record<string, unknown> }
+    }
+    const declared = Object.keys(CommunityFeaturesSchema.shape)
+    expect(declared).toContain('noArchive')
+    for (const key of Object.keys(features)) expect(declared).toContain(key)
   })
 
   it('loads a valid preset jsonc file with comments', async () => {
