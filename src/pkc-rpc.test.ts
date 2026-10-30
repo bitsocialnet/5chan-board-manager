@@ -14,7 +14,7 @@ const mockPKC = vi.mocked(PKC)
 function createMockInstance(state = 'connected') {
   const rpc = Object.assign(new EventEmitter(), { state })
   const instance = Object.assign(new EventEmitter(), {
-    communities: [] as string[],
+    communities: [] as PKCInstance['communities'],
     clients: { pkcRpcClients: { 'ws://localhost:9138': rpc } },
     destroy: vi.fn().mockResolvedValue(undefined),
   })
@@ -41,7 +41,7 @@ describe('connectToPkcRpc', () => {
 
   it.each([undefined, 'custom-agent:1.0'])('passes the configured userAgent (%s)', async (userAgent) => {
     const { instance, pkc } = createMockInstance()
-    instance.communities.push('board.bso')
+    instance.communities.push({ name: 'board.bso', publicKey: 'key', address: 'board.bso', started: true })
     mockPKC.mockResolvedValue(pkc)
     expect(await connectToPkcRpc('ws://localhost:9138', userAgent)).toBe(pkc)
     expect(mockPKC).toHaveBeenCalledWith({

@@ -10,8 +10,17 @@ import { connectToPkcRpc } from './pkc-rpc.js'
 
 const mockConnect = vi.mocked(connectToPkcRpc)
 
+type CommunitiesEntry = PKCInstance['communities'][number]
+
+/** A hosted community as pkc-js >= 0.0.129 lists it (pkcprotocol/pkc-js#460). */
+function entry(address: string, publicKey = `${address}-key`): CommunitiesEntry {
+  return address.includes('.')
+    ? { name: address, publicKey, address, started: true }
+    : { publicKey, address: publicKey, started: true }
+}
+
 function mockPKCInstance(communities: string[], destroy: () => Promise<void>): PKCInstance {
-  return { communities, destroy } as unknown as PKCInstance
+  return { communities: communities.map((address) => entry(address)), destroy } as unknown as PKCInstance
 }
 
 describe('validateBoardAddress', () => {
@@ -49,6 +58,25 @@ describe('validateBoardAddress', () => {
 
     await expect(validateBoardAddress('missing.bso', 'ws://localhost:9138'))
       .rejects.toThrow('No communities available on this node')
+  })
+
+  it('finds a board configured by its public key (pkc-js#460 entries)', async () => {
+    const keyOnly = entry('12D3KooWkey', '12D3KooWkey')
+    const named = entry('board.bso', '12D3KooWnamed')
+    mockConnect.mockResolvedValue({ communities: [keyOnly, named], destroy: mockDestroy } as unknown as PKCInstance)
+
+    await expect(validateBoardAddress('12D3KooWkey', 'ws://localhost:9138')).resolves.toBeUndefined()
+    await expect(validateBoardAddress('12D3KooWnamed', 'ws://localhost:9138')).resolves.toBeUndefined()
+    await expect(validateBoardAddress('board.bso', 'ws://localhost:9138')).resolves.toBeUndefined()
+  })
+
+  it('does not match an entry on a field other than its address or key', async () => {
+    mockConnect.mockResolvedValue({
+      communities: [{ name: 'board.bso', publicKey: 'key', address: 'board.bso', started: false }],
+      destroy: mockDestroy,
+    } as unknown as PKCInstance)
+
+    await expect(validateBoardAddress('true', 'ws://localhost:9138')).rejects.toThrow('Available communities: board.bso')
   })
 
   it('includes RPC URL in error message', async () => {

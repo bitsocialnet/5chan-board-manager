@@ -39,6 +39,11 @@ interface MockModerationRecord {
 }
 
 // Helper to create a mock PKC instance (RPC-only, no dataPath)
+/** A community hosted by the RPC node, as pkc-js >= 0.0.129 lists it (pkcprotocol/pkc-js#460). */
+function hostedEntry(name: string, publicKey = `${name}-key`): PKCInstance['communities'][number] {
+  return { name, publicKey, address: name, started: true }
+}
+
 function createMockPKC(publishDelayMs = 0) {
   const mockSigner = { address: 'mock-address-123', privateKey: 'mock-pk-123' }
   const publishedModerations: MockModerationRecord[] = []
@@ -48,7 +53,7 @@ function createMockPKC(publishDelayMs = 0) {
   const instance = {
     createSigner: vi.fn().mockResolvedValue({ ...mockSigner }),
     getCommunity: vi.fn(),
-    communities: [] as string[],
+    communities: [] as PKCInstance['communities'],
     createCommentModeration: vi.fn().mockImplementation((opts: MockModerationRecord) => ({
       ...opts,
       publish: vi.fn().mockImplementation(async () => {
@@ -861,7 +866,7 @@ describe('board manager logic', () => {
     it('throws for remote community when signer has no mod role', async () => {
       const { instance } = createMockPKC()
       // communities is empty → board.bso is remote
-      ;(instance as unknown as { communities: string[] }).communities = []
+      instance.communities = []
 
       const mockSub = createMockCommunity({
         pageCids: {},
@@ -883,7 +888,7 @@ describe('board manager logic', () => {
     it('starts successfully for remote community when signer has mod role', async () => {
       const { instance } = createMockPKC()
       // communities is empty → board.bso is remote
-      ;(instance as unknown as { communities: string[] }).communities = []
+      instance.communities = []
 
       const mockSub = createMockCommunity({
         pageCids: {},
@@ -907,7 +912,7 @@ describe('board manager logic', () => {
     it('auto-grants mod role for local community without mod role', async () => {
       const { instance } = createMockPKC()
       // communities includes board.bso → it's local
-      ;(instance as unknown as { communities: string[] }).communities = ['board.bso']
+      instance.communities = [hostedEntry('board.bso')]
 
       const mockSub = createMockCommunity({
         pageCids: {},
@@ -1046,7 +1051,7 @@ describe('board manager logic', () => {
     }
 
     function startLocalBoard(instance: PKCInstance, settings: unknown, bumpLimit?: number) {
-      ;(instance as unknown as { communities: string[] }).communities = ['board.bso']
+      instance.communities = [hostedEntry('board.bso')]
       const mockSub = Object.assign(
         createMockCommunity({
           pageCids: {},
@@ -1236,7 +1241,7 @@ describe('board manager logic', () => {
     it('never edits a remote board', async () => {
       const { instance, publishedModerations } = createMockPKC()
       const { mockSub, boardManagerPromise } = startLocalBoard(instance, undefined, 500)
-      ;(instance as unknown as { communities: string[] }).communities = []
+      instance.communities = []
       Object.assign(mockSub, {
         pageSorts: { posts: { active: { name: '@pkcprotocol/active-page-sort', publicOptions: { bumpLimit: '300' } } } },
       })

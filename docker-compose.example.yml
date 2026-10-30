@@ -19,7 +19,7 @@
 services:
   bitsocial:
     # Pinned: the default preset needs `bitsocial page-sort` (bitsocial-cli 0.19.107 or newer)
-    image: ghcr.io/bitsocialnet/bitsocial-cli:0.19.108
+    image: ghcr.io/bitsocialnet/bitsocial-cli:0.19.118
     container_name: 5chan-bitsocial-cli
     restart: unless-stopped
     ports:

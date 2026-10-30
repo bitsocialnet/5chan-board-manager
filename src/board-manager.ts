@@ -1,4 +1,5 @@
 import { connectToPkcRpc, watchRpcDisconnect } from './pkc-rpc.js'
+import { isHostedCommunity } from './communities.js'
 import Logger from '@pkcprotocol/pkc-logger'
 import { closeSync, openSync, utimesSync } from 'node:fs'
 import { join, dirname } from 'node:path'
@@ -147,7 +148,7 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
     if (roles[signerAddress]?.role === 'moderator' || roles[signerAddress]?.role === 'admin' || roles[signerAddress]?.role === 'owner') {
       return
     }
-    if (!pkc.communities.includes(communityAddress)) {
+    if (!isHostedCommunity(pkc, communityAddress)) {
       throw new Error(
         `Signer ${signerAddress} does not have a moderator role on remote community ${communityAddress}. Ask the community owner to add this address as a moderator.`
       )
@@ -367,7 +368,7 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
     if (settings === undefined) {
       // A board hosted by this RPC server loads its settings with its first updates; a remote
       // board never shares them, so only its published sort can be checked.
-      if (pkc.communities.includes(communityAddress)) return
+      if (isHostedCommunity(pkc, communityAddress)) return
       bumpLimitSyncPending = false
       const published = community.pageSorts?.posts?.active
       if (published?.name !== ACTIVE_PAGE_SORT_NAME) {

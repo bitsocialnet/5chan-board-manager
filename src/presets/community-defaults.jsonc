@@ -45,6 +45,16 @@
       // If replies include link it has to be of image or media
       "requireReplyLinkIsMedia": true,
 
+      // Extra media files on a post or reply, published as comment.gallery (pkc-js 0.0.132
+      // or newer). The count is on top of "link": with requirePostLinkIsMedia the first file
+      // goes in "link" and the gallery holds the rest, so 3 allows 4 files per post. 0 means
+      // a post or reply may carry a "link" but no gallery, like 4chan's one file per post.
+      // Only nodes running the new pkc-js enforce these; older nodes store the fields without
+      // checking galleries. 5chan does not render or publish galleries yet, so raising them
+      // only affects other clients until it does.
+      "maxPostGalleryItems": 0,
+      "maxReplyGalleryItems": 0,
+
       // Authors get new address per thread (post), but inside the same thread they retain the same identity
       "pseudonymityMode": "per-post",
 
