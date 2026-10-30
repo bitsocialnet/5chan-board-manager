@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.35](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.34...v0.2.35) (2026-10-30)
+
+### Features
+
+* **presets:** add comment.gallery features and upgrade pkc-js to 0.0.132 ([#21](https://github.com/bitsocialnet/5chan-board-manager/issues/21)) ([cf84692](https://github.com/bitsocialnet/5chan-board-manager/commit/cf84692d59fe6954caa9df5f821326d05246dd58)), closes [pkcprotocol/pkc-js#457](https://github.com/pkcprotocol/pkc-js/issues/457) [pkcprotocol/pkc-js#460](https://github.com/pkcprotocol/pkc-js/issues/460) [#460](https://github.com/bitsocialnet/5chan-board-manager/issues/460) [pre-#460](https://github.com/bitsocialnet/pre-/issues/460)
+
 ## [0.2.34](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.33...v0.2.34) (2026-10-25)
 
 ### Bug Fixes
