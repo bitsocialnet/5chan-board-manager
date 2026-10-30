@@ -49,9 +49,9 @@
       // or newer). The count is on top of "link": with requirePostLinkIsMedia the first file
       // goes in "link" and the gallery holds the rest, so 3 allows 4 files per post. 0 means
       // a post or reply may carry a "link" but no gallery, like 4chan's one file per post.
-      // Only nodes running the new pkc-js enforce these; older nodes store the fields without
-      // checking galleries. 5chan does not render or publish galleries yet, so raising them
-      // only affects other clients until it does.
+      // Only nodes running the new pkc-js enforce these; bitsocial-cli 0.19.116 to 0.19.118
+      // (pkc-js 0.0.129 to 0.0.131) stores the fields without checking galleries. 5chan does
+      // not render or publish galleries yet, so raising them only affects other clients.
       "maxPostGalleryItems": 0,
       "maxReplyGalleryItems": 0,
 
@@ -230,7 +230,8 @@
       // Page sorts the board publishes. Replaces pkc-js's nine default post sorts and five
       // reply sorts with what 5chan reads, which saves publish time and IPFS bytes.
       // Any change to "pages" regenerates every CommentUpdate once, on the next pass.
-      // Before applying this preset, install the sort in bitsocial-cli (>= 0.19.107):
+      // Before applying this preset, install the sort in bitsocial-cli (>= 0.19.116, the
+      // board manager's minimum):
       //   bitsocial page-sort install @pkcprotocol/active-page-sort@0.0.7
       // Without it, `5chan board add --apply-defaults` is rejected by the RPC server
       // (ERR_RPC_CLIENT_PAGE_SORT_NAME_NOT_AVAILABLE_ON_SERVER); remove the posts entry

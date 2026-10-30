@@ -60,14 +60,21 @@ describe('validateBoardAddress', () => {
       .rejects.toThrow('No communities available on this node')
   })
 
-  it('finds a board configured by its public key (pkc-js#460 entries)', async () => {
+  it('finds an unnamed board by its public key (pkc-js#460 entries)', async () => {
     const keyOnly = entry('12D3KooWkey', '12D3KooWkey')
     const named = entry('board.bso', '12D3KooWnamed')
     mockConnect.mockResolvedValue({ communities: [keyOnly, named], destroy: mockDestroy } as unknown as PKCInstance)
 
     await expect(validateBoardAddress('12D3KooWkey', 'ws://localhost:9138')).resolves.toBeUndefined()
-    await expect(validateBoardAddress('12D3KooWnamed', 'ws://localhost:9138')).resolves.toBeUndefined()
     await expect(validateBoardAddress('board.bso', 'ws://localhost:9138')).resolves.toBeUndefined()
+  })
+
+  it('does not accept a named board by its public key, so it cannot be added twice', async () => {
+    const named = entry('board.bso', '12D3KooWnamed')
+    mockConnect.mockResolvedValue({ communities: [named], destroy: mockDestroy } as unknown as PKCInstance)
+
+    await expect(validateBoardAddress('12D3KooWnamed', 'ws://localhost:9138'))
+      .rejects.toThrow('Community "12D3KooWnamed" not found')
   })
 
   it('does not match an entry on a field other than its address or key', async () => {

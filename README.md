@@ -48,7 +48,7 @@ pkc-js 0.0.132 adds `comment.gallery`, a list of extra media links on a post or 
 
 The preset sets both to `0`: a post or reply may have a `link` but no gallery, like 4chan's one file per post. The count is on top of `link`, because `requirePostLink` and `requirePostLinkIsMedia` only look at `link`, so a board that allows 4 files per post sets `maxPostGalleryItems: 3`. `noImages`, `noVideos`, `noAudio` and their reply versions apply to every gallery item as well.
 
-Raise the limits in the preset before running `5chan board add`, or on an existing board with bitsocial-cli (`bitsocial community edit <address> --features.maxPostGalleryItems 3 --features.maxReplyGalleryItems 3`). Only a bitsocial-cli running pkc-js 0.0.132 or newer enforces them; older nodes store the fields without checking galleries. The 5chan frontend does not render or publish galleries yet, so until it does, raising the limits only affects other clients.
+Raise the limits in the preset before running `5chan board add`, or on an existing board with bitsocial-cli (`bitsocial community edit <address> --features.maxPostGalleryItems 3 --features.maxReplyGalleryItems 3`). Only a bitsocial-cli running pkc-js 0.0.132 or newer enforces them; bitsocial-cli 0.19.116 to 0.19.118 (pkc-js 0.0.129 to 0.0.131) stores the fields without checking galleries. The 5chan frontend does not render or publish galleries yet, so until it does, raising the limits only affects other clients.
 
 ### Config Directory Layout
 
@@ -105,7 +105,8 @@ All fields except each board's `address` are optional:
 Docker is the only supported install path. The published image
 (`ghcr.io/bitsocialnet/5chan-board-manager:latest`) is built and tested with the
 bitsocial-cli version the default preset assumes (pinned in the compose files;
-the preset needs bitsocial-cli **0.19.107 or newer** for `bitsocial page-sort`),
+the board manager needs bitsocial-cli **0.19.116 or newer**: its pkc-js 0.0.129 changed
+the shape of the communities list the RPC sends, and older servers no longer connect),
 including the `@bitsocial/spam-blocker-challenge` and `@pkcprotocol/active-page-sort`
 packages that the preset references. Running 5chan
 outside Docker — or against a bitsocial-cli you manage yourself — is possible
@@ -202,7 +203,7 @@ bitsocial challenge install @bitsocial/spam-blocker-challenge
 
 If you do not want this dependency, remove both `@bitsocial/spam-blocker-challenge` entries from your preset (they are marked optional in the file) or use `--skip-apply-defaults`.
 
-**You must also install the bump-order page sort** (bitsocial-cli 0.19.107 or newer). The default preset names it in `settings.pages`, and the RPC server rejects `5chan board add --apply-defaults` with `ERR_RPC_CLIENT_PAGE_SORT_NAME_NOT_AVAILABLE_ON_SERVER` when it is missing:
+**You must also install the bump-order page sort** (bitsocial-cli 0.19.116 or newer, the board manager's minimum). The default preset names it in `settings.pages`, and the RPC server rejects `5chan board add --apply-defaults` with `ERR_RPC_CLIENT_PAGE_SORT_NAME_NOT_AVAILABLE_ON_SERVER` when it is missing:
 
 ```bash
 bitsocial page-sort install @pkcprotocol/active-page-sort@0.0.7
@@ -371,7 +372,7 @@ The bundled preset sets `settings.pages` (configurable page sorts, pkc-js 0.0.10
 - **replies**: `old` (thread view, oldest first, embedded) and `new` (board-view reply preview, fetched on demand). 5chan requests these keys and flattens them client-side, so they are not `oldFlat`/`newFlat`.
 - **Older 5chan clients**: 5chan v0.10.0 and older (desktop and Android builds not yet updated) fetch the posts `new` sort for the catalog's "creation date" option. To keep that option working for them, add `{ "name": "new" }` to `pages.posts` (not preloaded, so it costs no record bytes).
 
-Requires `bitsocial page-sort install @pkcprotocol/active-page-sort@0.0.7` on the bitsocial-cli instance (0.19.107 or newer), see [Installation](#installation).
+Requires `bitsocial page-sort install @pkcprotocol/active-page-sort@0.0.7` on the bitsocial-cli instance (0.19.116 or newer), see [Installation](#installation).
 
 Notes for operators:
 
