@@ -48,7 +48,7 @@ pkc-js 0.0.132 adds `comment.gallery`, a list of extra media links on a post or 
 
 The preset sets both to `0`: a post or reply may have a `link` but no gallery, like 4chan's one file per post. The count is on top of `link`, because `requirePostLink` and `requirePostLinkIsMedia` only look at `link`, so a board that allows 4 files per post sets `maxPostGalleryItems: 3`. `noImages`, `noVideos`, `noAudio` and their reply versions apply to every gallery item as well.
 
-Raise the limits in the preset before running `5chan board add`, or on an existing board with bitsocial-cli (`bitsocial community edit <address> --features.maxPostGalleryItems 3 --features.maxReplyGalleryItems 3`). Only a bitsocial-cli running pkc-js 0.0.132 or newer enforces them; bitsocial-cli 0.19.116 to 0.19.118 (pkc-js 0.0.129 to 0.0.131) stores the fields without checking galleries. The 5chan frontend does not render or publish galleries yet, so until it does, raising the limits only affects other clients.
+Raise the limits in the preset before running `5chan board add`, or on an existing board with bitsocial-cli (`bitsocial community edit <address> --features.maxPostGalleryItems 3 --features.maxReplyGalleryItems 3`). bitsocial-cli 0.19.119 or newer (pkc-js 0.0.132) enforces them; 0.19.116 to 0.19.118 stores the fields without checking galleries. The 5chan frontend does not render or publish galleries yet, so until it does, raising the limits only affects other clients.
 
 ### Config Directory Layout
 

@@ -250,7 +250,7 @@ jobs:
         run: |
           docker run -d --name 5chan-bitsocial-cli -p 9138:9138 \
             -e PKC_RPC_AUTH_KEY=ci-test-auth-key \
-            ghcr.io/bitsocialnet/bitsocial-cli:0.19.118
+            ghcr.io/bitsocialnet/bitsocial-cli:0.19.119
 
       - name: Wait for bitsocial RPC
         run: |
