@@ -20,7 +20,7 @@ services:
   bitsocial:
     # Pinned: the board manager needs bitsocial-cli 0.19.116 or newer (pkc-js 0.0.129 changed the
     # communities list the RPC sends) and the default preset needs `bitsocial page-sort`
-    image: ghcr.io/bitsocialnet/bitsocial-cli:0.19.118
+    image: ghcr.io/bitsocialnet/bitsocial-cli:0.19.119
     container_name: 5chan-bitsocial-cli
     restart: unless-stopped
     ports:
