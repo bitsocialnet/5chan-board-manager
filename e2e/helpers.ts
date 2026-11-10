@@ -91,6 +91,34 @@ export async function publishReply(
   return cid
 }
 
+/** Purge a comment as a moderator, the way a moderator does by hand, and wait for the board to accept it */
+export async function purgeAsModerator(
+  pkc: PKCInstance,
+  communityAddress: string,
+  commentCid: string,
+  signer: Awaited<ReturnType<PKCInstance['createSigner']>>,
+): Promise<void> {
+  const mod = await pkc.createCommentModeration({
+    commentCid,
+    commentModeration: { purged: true },
+    communityAddress,
+    signer,
+  })
+
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error(`purgeAsModerator timed out for ${commentCid}`)), 120_000)
+    mod.on('challengeverification', (msg: { challengeSuccess: boolean; reason?: string }) => {
+      clearTimeout(timeout)
+      if (msg.challengeSuccess) {
+        resolve()
+      } else {
+        reject(new Error(`Purge of ${commentCid} rejected: ${msg.reason}`))
+      }
+    })
+    mod.publish()
+  })
+}
+
 /** Collect all threads from a community's pages (active sort preferred, fallback to any preloaded) */
 async function getAllThreads(sub: Community): Promise<ThreadComment[]> {
   const threads: ThreadComment[] = []

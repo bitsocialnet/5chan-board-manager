@@ -793,6 +793,7 @@ State is stored as `state.json` inside each board's directory (`boards/{address}
 - **`holdArchivingUntilUpdatedAt`** (optional): set while capacity archiving waits for the board to publish pages sorted with a bump limit the board manager just wrote, or with post sorts `5chan board add --apply-defaults` just changed; removed once the board publishes a record with a later `updatedAt`
 - State writes use atomic temp-then-rename to prevent corruption
 - Loaded on startup, written on archive, entries removed on purge
+- An archive or purge the board rejects (its `challengeverification` fails, e.g. after the signer lost its moderator role) is logged and taken back out of state, so it is retried like a publish that failed. A purge rejected because the board has no record of the comment counts as done, since the comment was already purged
 
 ## Cold Start
 

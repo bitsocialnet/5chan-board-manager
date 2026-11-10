@@ -12,6 +12,9 @@ export type Signer = Awaited<ReturnType<PKCInstance['createSigner']>>
 /** Comment returned by `pkc.getComment()` */
 export type Comment = Awaited<ReturnType<PKCInstance['getComment']>>
 
+/** Moderation returned by `pkc.createCommentModeration()` */
+export type CommentModeration = Awaited<ReturnType<PKCInstance['createCommentModeration']>>
+
 /** A single page returned by `community.posts.getPage()` */
 export type Page = Awaited<ReturnType<Community['posts']['getPage']>>
 
