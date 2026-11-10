@@ -722,6 +722,8 @@ _See code: [src/commands/start.ts](https://github.com/bitsocialnet/5chan-board-m
 
 This means you can add, edit, or remove boards while the board manager is running — either by editing config files directly or by running `5chan board add/edit/remove` in another terminal. When global config changes (rpcUrl, defaults), all running boards are restarted.
 
+A board whose manager fails to start, for example a remote board whose owner has not yet made the board manager's signer a moderator, is retried by the reconcile loop without a config change: 30 seconds after the failure, then with the delay doubling up to 10 minutes while it keeps failing. A change to that board's config retries it right away.
+
 ## File Locking
 
 Each board manager acquires a PID-based lock file (`{statePath}.lock`) to prevent concurrent board managers on the same board. On startup:
