@@ -670,7 +670,13 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
       // can queue new work at this point: the timer is cleared, the listener is
       // removed, and both paths bail on `stopped`.
       await workLock
-      saveState(statePath, state)
+      try {
+        saveState(statePath, state)
+      } catch (err) {
+        // ENOENT: `5chan board remove` deleted the board directory, and this stop is the reload
+        // that follows. The lock and the RPC client must still be released either way.
+        log.error(`failed to save state for ${communityAddress}: ${err}`)
+      }
       await fileLock.release()
       let teardownTimer: NodeJS.Timeout | undefined
       try {

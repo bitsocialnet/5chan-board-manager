@@ -6,6 +6,7 @@ import { createRequire } from 'node:module'
 import lockfile from '@pkcprotocol/proper-lock-file'
 import Logger from '@pkcprotocol/pkc-logger'
 import { loadState, saveState } from './state.js'
+import { loadConfig } from './config-manager.js'
 import type { BoardManagerState, PKCInstance, Page, ThreadComment } from './types.js'
 import { startBoardManager, resolvePurgeSweepIntervalMs } from './board-manager.js'
 
@@ -1473,6 +1474,62 @@ describe('board manager logic', () => {
       })
       expect(existsSync(lockPath)).toBe(true)
       await boardManager.stop()
+    })
+  })
+
+  // `5chan board remove` deletes boards/<address>/ while the daemon still runs that board's
+  // manager; the next config reload stops it. A state write after the removal must not bring
+  // the directory back: without its config.json, every later loadConfig() throws on it.
+  describe('board directory removed while running', () => {
+    it('does not recreate the board directory when stopped after it was removed', async () => {
+      const { instance } = createMockPKC()
+      const mockSub = createMockCommunity({ pageCids: {}, pages: {} })
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
+      writeFileSync(join(boardDir, 'config.json'), JSON.stringify({ address: 'board.bso' }))
+
+      const boardManager = await startBoardManager({
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
+        boardDir,
+      })
+      rmSync(boardDir, { recursive: true })
+
+      await boardManager.stop()
+
+      expect(existsSync(boardDir)).toBe(false)
+      expect(loadConfig(dir).boards).toEqual([])
+      // The rest of the teardown still ran
+      expect(mockSub.stop).toHaveBeenCalledOnce()
+      expect(instance.destroy).toHaveBeenCalledOnce()
+    })
+
+    it('does not recreate the board directory when a moderation lands after it was removed', async () => {
+      const { instance, publishStarts, publishedModerations } = createMockPKC(300)
+      const mockSub = createMockCommunity({
+        pageCids: {},
+        pages: { active: { comments: [mockThread('QmKeep'), mockThread('QmOverflow')], nextCid: undefined } as Page },
+      })
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
+
+      const boardManager = await startBoardManager({
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
+        boardDir,
+        perPage: 1,
+        pages: 1,
+        purgeSweepIntervalMs: 0,
+      })
+      await vi.waitFor(() => {
+        expect(publishStarts).toHaveLength(1)
+      })
+      rmSync(boardDir, { recursive: true })
+
+      await vi.waitFor(() => {
+        expect(publishedModerations).toHaveLength(1)
+      })
+      await boardManager.stop()
+
+      expect(existsSync(boardDir)).toBe(false)
     })
   })
 

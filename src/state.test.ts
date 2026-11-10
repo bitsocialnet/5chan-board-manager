@@ -88,14 +88,14 @@ describe('state', () => {
       expect(loaded.archivedThreads).toEqual(state.archivedThreads)
     })
 
-    it('auto-creates missing parent directories', () => {
-      const nestedPath = join(dir, 'a', 'b', 'c', 'state.json')
+    // The board directory holds the board's config.json. Once `5chan board remove` deleted it,
+    // recreating it with only state.json left a directory that broke every later config load.
+    it('does not recreate a missing board directory', () => {
+      const boardDir = join(dir, 'boards', 'removed.bso')
       const state: BoardManagerState = { signers: {}, archivedThreads: {} }
-      saveState(nestedPath, state)
 
-      expect(existsSync(nestedPath)).toBe(true)
-      const loaded = loadState(nestedPath)
-      expect(loaded).toEqual(state)
+      expect(() => saveState(join(boardDir, 'state.json'), state)).toThrow(/ENOENT/)
+      expect(existsSync(boardDir)).toBe(false)
     })
   })
 

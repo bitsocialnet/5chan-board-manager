@@ -21,8 +21,12 @@ export function loadState(path: string): BoardManagerState {
   }
 }
 
+/**
+ * Atomically write the state file. Its directory must exist (acquireLock creates it): a board
+ * directory that is gone was removed with `5chan board remove`, and recreating it with only
+ * state.json would leave a board directory without config.json, which fails every config load.
+ */
 export function saveState(path: string, state: BoardManagerState): void {
-  mkdirSync(dirname(path), { recursive: true })
   const tmpPath = path + '.tmp'
   try {
     writeFileSync(tmpPath, JSON.stringify(state, null, 2) + '\n')
