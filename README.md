@@ -15,7 +15,7 @@ The board's bump order comes from [`@pkcprotocol/active-page-sort`](https://gith
 
 - A reply whose content has a line equal to `sage` does not bump its thread
 - Past `bump_limit` replies a thread stays **open** and keeps taking replies, but none of them bump it. It sinks, and is archived when it falls off the last page (Feature 1), as on 4chan. A `sage` reply still counts toward the limit
-- The board manager does not archive or lock threads at the bump limit. Instead it writes the board's `bumpLimit` into the sort's `bumpLimit` option: `5chan board add --apply-defaults` writes the board's own value, and each time a board manager starts it puts the configured value back if they differ (the board manager config is the source of truth). A change through `board edit --bump-limit`, `defaults set --bump-limit` or a config file restarts the board manager, which then updates the sort. After changing the limit it holds capacity archiving until the board publishes a record generated after the edit (a few publish cycles; a quiet board republishes at least every 15 minutes), because until then the pages are still ordered by the old limit
+- The board manager does not archive or lock threads at the bump limit. Instead it writes the board's `bumpLimit` into the sort's `bumpLimit` option: `5chan board add --apply-defaults` writes the board's own value, and each time a board manager starts it puts the configured value back if they differ (the board manager config is the source of truth). A change through `board edit --bump-limit`, `defaults set --bump-limit` or a config file restarts the board manager, which then updates the sort. After changing the limit it holds capacity archiving until the board publishes a record generated after the edit (a few publish cycles; a quiet board republishes at least every 15 minutes), because until then the pages are still ordered by the old limit. The hold is kept in `state.json`, so a board manager restarted in the meantime keeps holding. `5chan board add --apply-defaults` sets the same hold in the new board's `state.json` when applying the preset changed the board's post sorts
 - A board whose `settings.pages` does not name `@pkcprotocol/active-page-sort` (by registry `name`; `path:` entries are left alone) has **no bump limit**; the board manager logs that `bumpLimit` has no effect there
 - Threads archived at the bump limit by earlier versions stay archived
 
@@ -790,6 +790,7 @@ State is stored as `state.json` inside each board's directory (`boards/{address}
 
 - **`signers`**: maps board address → mod signer private key (auto-created if missing)
 - **`archivedThreads`**: maps comment CID → archive metadata (entries removed on purge)
+- **`holdArchivingUntilUpdatedAt`** (optional): set while capacity archiving waits for the board to publish pages sorted with a bump limit the board manager just wrote, or with post sorts `5chan board add --apply-defaults` just changed; removed once the board publishes a record with a later `updatedAt`
 - State writes use atomic temp-then-rename to prevent corruption
 - Loaded on startup, written on archive, entries removed on purge
 

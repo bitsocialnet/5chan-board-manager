@@ -12,10 +12,14 @@ export function loadState(path: string): BoardManagerState {
   try {
     const data = readFileSync(path, 'utf-8')
     const parsed = JSON.parse(data) as Partial<BoardManagerState>
-    return {
+    const state: BoardManagerState = {
       signers: parsed.signers ?? {},
       archivedThreads: parsed.archivedThreads ?? {},
     }
+    if (typeof parsed.holdArchivingUntilUpdatedAt === 'number') {
+      state.holdArchivingUntilUpdatedAt = parsed.holdArchivingUntilUpdatedAt
+    }
+    return state
   } catch {
     return structuredClone(DEFAULT_STATE)
   }

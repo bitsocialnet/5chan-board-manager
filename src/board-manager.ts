@@ -5,7 +5,7 @@ import { closeSync, openSync, utimesSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { loadState, saveState, acquireLock } from './state.js'
 import { DEFAULT_BUMP_LIMIT } from './defaults.js'
-import { ACTIVE_PAGE_SORT_NAME, runsActivePageSort, withActivePageSortBumpLimit } from './page-sorts.js'
+import { ACTIVE_PAGE_SORT_NAME, archivingHoldAfterSortEdit, runsActivePageSort, withActivePageSortBumpLimit } from './page-sorts.js'
 import type { BoardManagerOptions, BoardManagerResult, BoardManagerState, Comment, DeprecatedModerationReason, FileLock, ModerationReasons, Community, Signer, ThreadComment, Page, PKCInstance } from './types.js'
 
 const log = Logger('bitsocial:5chan-board-manager:archiver')
@@ -112,15 +112,13 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
   const noArchivePurgedThreads = new Set<string>()
   // The bump limit lives in the board's page sort; checked against it once per start.
   let bumpLimitSyncPending = true
-  // Set after this manager changed the sort's limit: capacity archiving waits for a record whose
-  // `updatedAt` is past this. Until the board publishes a record generated after the edit, its
-  // pages are still ordered by the old limit, so archiving by them would take the wrong threads.
-  // `pageSorts` is no signal (pkc-js updates it on edit, before the pages are regenerated), and
-  // `updatedAt` is not wall-clock time (it stays strictly increasing, so rapid publishes run it
-  // ahead of the clock). Publish cycles do not overlap, so a record stamped past both the record
-  // current at the edit and the edit's own second, plus one for a cycle already in flight, was
-  // generated after the edit.
-  let holdArchivingUntilUpdatedAt: number | undefined
+  // `state.holdArchivingUntilUpdatedAt` is set after a manager changed the sort's limit, or by
+  // `board add --apply-defaults` when it changed the board's post sorts: capacity archiving waits
+  // for a record whose `updatedAt` is past it (see archivingHoldAfterSortEdit). Until the board
+  // publishes a record generated after the edit, its pages are still ordered by the old limit, so
+  // archiving by them would take the wrong threads. `pageSorts` is no signal (pkc-js updates it on
+  // edit, before the pages are regenerated). The hold is kept in state.json: a manager started
+  // before then finds the limit already set and would not hold by itself.
 
   log(`starting board manager for ${communityAddress} (capacity=${maxThreads}, bumpLimit=${bumpLimit}, purgeAfter=${archivePurgeSeconds}s)`)
 
@@ -392,9 +390,16 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
     const updatedAtBeforeEdit = community.updatedAt ?? 0
     try {
       await community.edit({ settings: updatedSettings })
-      holdArchivingUntilUpdatedAt = Math.max(updatedAtBeforeEdit, Math.floor(Date.now() / 1000)) + 1
     } catch (err) {
       log.error(`failed to set bump limit on ${communityAddress} (configured ${bumpLimit}, ${ACTIVE_PAGE_SORT_NAME} has ${current ?? 'none'}): ${err}`)
+      return
+    }
+    state.holdArchivingUntilUpdatedAt = archivingHoldAfterSortEdit(updatedAtBeforeEdit)
+    try {
+      saveState(statePath, state)
+    } catch (err) {
+      // The hold still applies to this manager; only a restart before the board republishes loses it
+      log.error(`failed to save state for ${communityAddress}: ${err}`)
     }
   }
 
@@ -455,10 +460,11 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
     // Filter out pinned threads
     const nonPinned = threads.filter((t: ThreadComment) => !t.pinned)
 
-    if (holdArchivingUntilUpdatedAt !== undefined && (community.updatedAt ?? 0) > holdArchivingUntilUpdatedAt) {
-      holdArchivingUntilUpdatedAt = undefined
+    if (state.holdArchivingUntilUpdatedAt !== undefined && (community.updatedAt ?? 0) > state.holdArchivingUntilUpdatedAt) {
+      delete state.holdArchivingUntilUpdatedAt
+      saveState(statePath, state)
     }
-    const awaitingBumpLimitPages = holdArchivingUntilUpdatedAt !== undefined
+    const awaitingBumpLimitPages = state.holdArchivingUntilUpdatedAt !== undefined
     if (awaitingBumpLimitPages) {
       log(`waiting for ${communityAddress} to publish pages sorted with bumpLimit ${bumpLimit} before archiving by capacity`)
     }

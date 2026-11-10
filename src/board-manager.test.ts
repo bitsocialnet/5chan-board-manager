@@ -1227,6 +1227,45 @@ describe('board manager logic', () => {
       expect(publishedModerations[0].commentCid).toBe('QmOverflow')
     })
 
+    // pkc-js applies an edit to the board's settings at once but regenerates its pages in a later
+    // publish cycle. A manager started in between (another `board edit`, `defaults set`, a daemon
+    // restart) finds the limit already set, so only a hold kept from the edit stops it archiving
+    // by pages still sorted with the old limit.
+    it('keeps holding capacity archiving across a restart before the board publishes the new pages', async () => {
+      const editedAt = Math.floor(Date.now() / 1000)
+      const first = createMockPKC()
+      const { mockSub: firstSub, boardManagerPromise: firstPromise } = startLocalBoard(first.instance, settingsWithSort({ bumpLimit: '300' }), 500)
+      Object.assign(firstSub, { updatedAt: editedAt })
+      const firstManager = await firstPromise
+      await vi.waitFor(() => {
+        expect(firstSub.edit).toHaveBeenCalledOnce()
+      })
+      await firstManager.stop()
+
+      const second = createMockPKC()
+      const { mockSub, boardManagerPromise } = startLocalBoard(second.instance, settingsWithSort({ bumpLimit: '500' }), 500)
+      // The record current at the edit: settings with the new limit, pages sorted by the old one
+      Object.assign(mockSub, { updatedAt: editedAt })
+      const boardManager = await boardManagerPromise
+      mockSub._triggerUpdate()
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(second.publishedModerations).toHaveLength(0)
+      expect(mockSub.edit).not.toHaveBeenCalled()
+
+      // A record generated after the edit
+      Object.assign(mockSub, { updatedAt: editedAt + 60 })
+      mockSub._triggerUpdate()
+      await vi.waitFor(() => {
+        expect(second.publishedModerations).toHaveLength(1)
+      })
+      await boardManager.stop()
+
+      expect(first.publishedModerations).toHaveLength(0)
+      expect(second.publishedModerations[0].commentCid).toBe('QmOverflow')
+      // Released for good: the next start archives on its first update again
+      expect(loadState(join(boardDir, 'state.json')).holdArchivingUntilUpdatedAt).toBeUndefined()
+    })
+
     it('does not hold archiving when the sort already had the configured limit', async () => {
       const { instance, publishedModerations } = createMockPKC()
       const { mockSub, boardManagerPromise } = startLocalBoard(instance, settingsWithSort({ bumpLimit: '500' }), 500)

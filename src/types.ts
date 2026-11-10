@@ -82,6 +82,11 @@ export interface FileLock {
 export interface BoardManagerState {
   signers: Record<string, SignerState>
   archivedThreads: Record<string, ArchivedThread>
+  /**
+   * Set after the board manager changed the board's bump limit: capacity archiving waits for a
+   * record whose `updatedAt` is past it. Persisted so a restart during the wait keeps waiting.
+   */
+  holdArchivingUntilUpdatedAt?: number
 }
 
 /** Per-board config entry in the multi-board config file */

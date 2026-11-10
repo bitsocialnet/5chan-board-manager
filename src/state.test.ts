@@ -34,6 +34,12 @@ describe('state', () => {
       expect(loaded).toEqual(existing)
     })
 
+    it('keeps a bump-limit archiving hold', () => {
+      const existing: BoardManagerState = { signers: {}, archivedThreads: {}, holdArchivingUntilUpdatedAt: 1_700_000_001 }
+      saveState(statePath, existing)
+      expect(loadState(statePath)).toEqual(existing)
+    })
+
     it('returns default state when file contains invalid JSON', async () => {
       const { writeFileSync } = await import('node:fs')
       writeFileSync(statePath, 'not json')

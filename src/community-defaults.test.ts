@@ -27,7 +27,7 @@ function makeTmpDir(): string {
   return mkdtempSync(join(tmpdir(), 'community-defaults-test-'))
 }
 
-function createMockCommunity(overrides: Partial<Pick<Community, 'features' | 'settings'>> = {}): Community {
+function createMockCommunity(overrides: Partial<Pick<Community, 'features' | 'settings' | 'updatedAt'>> = {}): Community {
   const edit = vi.fn<Community['edit']>().mockResolvedValue(undefined)
   return {
     features: {},
@@ -518,7 +518,32 @@ describe('applyCommunityDefaultsToBoard', () => {
       features: { noDownvotes: true },
       settings: { fetchThumbnailUrls: false },
     })
+    // The post sorts did not change, so the board's pages stay in the same order
+    expect(result.holdArchivingUntilUpdatedAt).toBeUndefined()
     expect(instance.destroy).toHaveBeenCalledOnce()
+  })
+
+  // The board applies a settings edit at once but regenerates its pages in a later publish cycle.
+  // The board manager started for a newly added board finds the sort already set, so it only waits
+  // for those pages if it is given the hold.
+  it('returns an archiving hold when the edit changes the board\'s post sorts', async () => {
+    const updatedAt = Math.floor(Date.now() / 1000) + 3600
+    const community = createMockCommunity({
+      updatedAt,
+      settings: { pages: { posts: [{ name: '@pkcprotocol/active-page-sort', options: { bumpLimit: '300' }, preloaded: true }] } },
+    })
+    mockConnect.mockResolvedValue(createMockPKCInstance(community))
+
+    const result = await applyCommunityDefaultsToBoard('board.bso', 'ws://localhost:9138', {
+      boardSettings: {
+        settings: { pages: { posts: [{ name: '@pkcprotocol/active-page-sort', options: { bumpLimit: '250' }, preloaded: true }] } },
+      },
+      boardManagerSettings: {},
+    })
+
+    expect(result.applied).toBe(true)
+    // Past both the record current at the edit and the edit's own second
+    expect(result.holdArchivingUntilUpdatedAt).toBe(updatedAt + 1)
   })
 
   it('returns no-op when all defaults already exist', async () => {
