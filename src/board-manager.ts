@@ -5,10 +5,18 @@ import { closeSync, openSync, utimesSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { loadState, saveState, acquireLock } from './state.js'
 import { DEFAULT_BUMP_LIMIT } from './defaults.js'
-import { ACTIVE_PAGE_SORT_NAME, runsActivePageSort, withActivePageSortBumpLimit } from './page-sorts.js'
-import type { BoardManagerOptions, BoardManagerResult, BoardManagerState, Comment, DeprecatedModerationReason, FileLock, ModerationReasons, Community, Signer, ThreadComment, Page, PKCInstance } from './types.js'
+import { ACTIVE_PAGE_SORT_NAME, archivingHoldAfterSortEdit, runsActivePageSort, withActivePageSortBumpLimit } from './page-sorts.js'
+import type { ArchivedThread, BoardManagerOptions, BoardManagerResult, BoardManagerState, Comment, CommentModeration, DeprecatedModerationReason, FileLock, ModerationReasons, Community, Signer, ThreadComment, Page, PKCInstance } from './types.js'
 
 const log = Logger('bitsocial:5chan-board-manager:archiver')
+
+/**
+ * The challengeverification reason pkc-js gives for a moderation of a comment the board has no
+ * record of (ERR_PUBLICATION_PARENT_DOES_NOT_EXIST_IN_COMMUNITY in its errors.js, which it does not
+ * export). Its validation checks that a moderation's comment exists before it runs the moderation
+ * checks, so this is the reason, not ERR_COMMENT_MODERATION_NO_COMMENT_TO_EDIT.
+ */
+const NO_COMMENT_TO_MODERATE = 'The parent of this publication does not exist within the community\'s records'
 
 /** Read from old configs but ignored: the bump limit is applied by the page sort now. */
 const DEPRECATED_MODERATION_REASONS: readonly DeprecatedModerationReason[] = ['archiveBumpLimit', 'lockBumpLimit']
@@ -112,15 +120,13 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
   const noArchivePurgedThreads = new Set<string>()
   // The bump limit lives in the board's page sort; checked against it once per start.
   let bumpLimitSyncPending = true
-  // Set after this manager changed the sort's limit: capacity archiving waits for a record whose
-  // `updatedAt` is past this. Until the board publishes a record generated after the edit, its
-  // pages are still ordered by the old limit, so archiving by them would take the wrong threads.
-  // `pageSorts` is no signal (pkc-js updates it on edit, before the pages are regenerated), and
-  // `updatedAt` is not wall-clock time (it stays strictly increasing, so rapid publishes run it
-  // ahead of the clock). Publish cycles do not overlap, so a record stamped past both the record
-  // current at the edit and the edit's own second, plus one for a cycle already in flight, was
-  // generated after the edit.
-  let holdArchivingUntilUpdatedAt: number | undefined
+  // `state.holdArchivingUntilUpdatedAt` is set after a manager changed the sort's limit, or by
+  // `board add --apply-defaults` when it changed the board's post sorts: capacity archiving waits
+  // for a record whose `updatedAt` is past it (see archivingHoldAfterSortEdit). Until the board
+  // publishes a record generated after the edit, its pages are still ordered by the old limit, so
+  // archiving by them would take the wrong threads. `pageSorts` is no signal (pkc-js updates it on
+  // edit, before the pages are regenerated). The hold is kept in state.json: a manager started
+  // before then finds the limit already set and would not hold by itself.
 
   log(`starting board manager for ${communityAddress} (capacity=${maxThreads}, bumpLimit=${bumpLimit}, purgeAfter=${archivePurgeSeconds}s)`)
 
@@ -221,6 +227,47 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
     log(`address migration complete: ${oldAddress} → ${newAddress}`)
   }
 
+  /**
+   * Publish a moderation. Over RPC, publish() resolves once the RPC server takes the request, and
+   * the board's verdict comes later as a challengeverification. A rejection that arrives before
+   * publish() returns makes this throw, so the caller records nothing; one that arrives after runs
+   * `undo` to take back what the caller recorded, so the work is tried again like a failed publish.
+   * A purge rejected because the board has no record of the comment counts as done: a purge
+   * deletes the record, so the comment was already purged (by hand, or by this manager before a
+   * crash lost its state save), and retrying would only be rejected again on every pass.
+   */
+  async function publishModeration(mod: CommentModeration, action: string, undo: () => void): Promise<void> {
+    let published = false
+    let rejection: string | undefined
+    mod.once('challengeverification', (verification) => {
+      if (verification.challengeSuccess) return
+      if (mod.commentModeration.purged === true && verification.reason === NO_COMMENT_TO_MODERATE) {
+        log(`${communityAddress} has no comment ${mod.commentCid} to purge: it was already purged`)
+        return
+      }
+      rejection = [verification.reason, ...Object.values(verification.challengeErrors ?? {})]
+        .filter((text) => text !== undefined && text !== '')
+        .join('; ') || 'no reason given'
+      if (!published) return
+      log.error(`${communityAddress} rejected ${action}: ${rejection}`)
+      undo()
+      // Once stopped, stop() saves once more and then releases the lock. A verdict that arrives
+      // before that save is covered by it. One that arrives later, while the RPC client is torn
+      // down, is lost like a verdict that never arrives, and the moderation stays recorded.
+      if (stopped) return
+      try {
+        saveState(statePath, state)
+      } catch (err) {
+        log.error(`failed to save state for ${communityAddress}: ${err}`)
+      }
+    })
+    await mod.publish()
+    if (rejection !== undefined) {
+      throw new Error(`${communityAddress} rejected ${action}: ${rejection}`)
+    }
+    published = true
+  }
+
   async function archiveThread(commentCid: string, signer: Signer, reason: string): Promise<void> {
     log(`archiving thread ${commentCid} (${reason})`)
     const mod = await pkc.createCommentModeration({
@@ -229,8 +276,16 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
       communityAddress,
       signer,
     })
-    await mod.publish()
-    state.archivedThreads[commentCid] = { archivedTimestamp: Math.floor(Date.now() / 1000) }
+    let archived: ArchivedThread | undefined
+    await publishModeration(mod, `archiving thread ${commentCid}`, () => {
+      // Untracked, the thread is archived again on the next update instead of being purged later
+      // as if it had spent the retention period in the archive
+      if (archived !== undefined && state.archivedThreads[commentCid] === archived) {
+        delete state.archivedThreads[commentCid]
+      }
+    })
+    archived = { archivedTimestamp: Math.floor(Date.now() / 1000) }
+    state.archivedThreads[commentCid] = archived
     saveState(statePath, state)
   }
 
@@ -242,7 +297,14 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
       communityAddress,
       signer,
     })
-    await mod.publish()
+    const archived = state.archivedThreads[commentCid]
+    await publishModeration(mod, `purging thread ${commentCid}`, () => {
+      // Tracked again, the purge is retried instead of the thread staying in the archive for good
+      if (archived !== undefined && state.archivedThreads[commentCid] === undefined) {
+        state.archivedThreads[commentCid] = archived
+      }
+      noArchivePurgedThreads.delete(commentCid)
+    })
     delete state.archivedThreads[commentCid]
     saveState(statePath, state)
   }
@@ -255,7 +317,12 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
       communityAddress,
       signer,
     })
-    await mod.publish()
+    const archived = state.archivedThreads[commentCid]
+    await publishModeration(mod, `purging author-deleted comment ${commentCid}`, () => {
+      if (archived !== undefined && state.archivedThreads[commentCid] === undefined) {
+        state.archivedThreads[commentCid] = archived
+      }
+    })
     if (state.archivedThreads[commentCid]) {
       delete state.archivedThreads[commentCid]
     }
@@ -392,9 +459,16 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
     const updatedAtBeforeEdit = community.updatedAt ?? 0
     try {
       await community.edit({ settings: updatedSettings })
-      holdArchivingUntilUpdatedAt = Math.max(updatedAtBeforeEdit, Math.floor(Date.now() / 1000)) + 1
     } catch (err) {
       log.error(`failed to set bump limit on ${communityAddress} (configured ${bumpLimit}, ${ACTIVE_PAGE_SORT_NAME} has ${current ?? 'none'}): ${err}`)
+      return
+    }
+    state.holdArchivingUntilUpdatedAt = archivingHoldAfterSortEdit(updatedAtBeforeEdit)
+    try {
+      saveState(statePath, state)
+    } catch (err) {
+      // The hold still applies to this manager; only a restart before the board republishes loses it
+      log.error(`failed to save state for ${communityAddress}: ${err}`)
     }
   }
 
@@ -455,10 +529,11 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
     // Filter out pinned threads
     const nonPinned = threads.filter((t: ThreadComment) => !t.pinned)
 
-    if (holdArchivingUntilUpdatedAt !== undefined && (community.updatedAt ?? 0) > holdArchivingUntilUpdatedAt) {
-      holdArchivingUntilUpdatedAt = undefined
+    if (state.holdArchivingUntilUpdatedAt !== undefined && (community.updatedAt ?? 0) > state.holdArchivingUntilUpdatedAt) {
+      delete state.holdArchivingUntilUpdatedAt
+      saveState(statePath, state)
     }
-    const awaitingBumpLimitPages = holdArchivingUntilUpdatedAt !== undefined
+    const awaitingBumpLimitPages = state.holdArchivingUntilUpdatedAt !== undefined
     if (awaitingBumpLimitPages) {
       log(`waiting for ${communityAddress} to publish pages sorted with bumpLimit ${bumpLimit} before archiving by capacity`)
     }
@@ -670,7 +745,19 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
       // can queue new work at this point: the timer is cleared, the listener is
       // removed, and both paths bail on `stopped`.
       await workLock
-      saveState(statePath, state)
+      // The lock and the RPC client must be released even when this save fails
+      let finalSaveError: unknown
+      try {
+        saveState(statePath, state)
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+          // `5chan board remove` deleted the board directory, and this stop is the reload that
+          // follows: there is no board left to save state for
+          log(`board directory for ${communityAddress} is gone, not saving its state`)
+        } else {
+          finalSaveError = err
+        }
+      }
       await fileLock.release()
       let teardownTimer: NodeJS.Timeout | undefined
       try {
@@ -688,11 +775,13 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
         ])
       } catch (error) {
         options.onRpcDisconnect?.()
+        if (finalSaveError !== undefined) log.error(`failed to save state for ${communityAddress}: ${finalSaveError}`)
         throw error
       } finally {
         clearTimeout(teardownTimer)
         unwatchRpc()
       }
+      if (finalSaveError !== undefined) throw finalSaveError
       log(`board manager stopped for ${communityAddress}`)
     },
   }

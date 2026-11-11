@@ -3,9 +3,11 @@ import { mkdtempSync, mkdirSync, rmSync, existsSync, writeFileSync, renameSync }
 import { join } from 'node:path'
 import { tmpdir, hostname } from 'node:os'
 import { createRequire } from 'node:module'
+import { EventEmitter } from 'node:events'
 import lockfile from '@pkcprotocol/proper-lock-file'
 import Logger from '@pkcprotocol/pkc-logger'
 import { loadState, saveState } from './state.js'
+import { loadConfig } from './config-manager.js'
 import type { BoardManagerState, PKCInstance, Page, ThreadComment } from './types.js'
 import { startBoardManager, resolvePurgeSweepIntervalMs } from './board-manager.js'
 
@@ -54,7 +56,8 @@ function createMockPKC(publishDelayMs = 0) {
     createSigner: vi.fn().mockResolvedValue({ ...mockSigner }),
     getCommunity: vi.fn(),
     communities: [] as PKCInstance['communities'],
-    createCommentModeration: vi.fn().mockImplementation((opts: MockModerationRecord) => ({
+    // An emitter, like a pkc-js publication, so tests can deliver the board's challengeverification
+    createCommentModeration: vi.fn().mockImplementation((opts: MockModerationRecord) => Object.assign(new EventEmitter(), {
       ...opts,
       publish: vi.fn().mockImplementation(async () => {
         // Lets tests hold a moderation in flight, e.g. across a stop().
@@ -106,6 +109,22 @@ function createMockCommunity(postsConfig: {
     _triggerUpdate: () => updateCallback?.(),
   }
 }
+
+/**
+ * Deliver the board's rejection of the n-th moderation the manager created. Over RPC, publish()
+ * resolves when the RPC server takes the request; the verdict arrives later as this event.
+ */
+function rejectModeration(instance: PKCInstance, index: number, reason: string): void {
+  const mod = vi.mocked(instance.createCommentModeration).mock.results[index]?.value as unknown as EventEmitter
+  mod.emit('challengeverification', { challengeSuccess: false, reason })
+}
+
+/**
+ * pkc-js's reason (ERR_PUBLICATION_PARENT_DOES_NOT_EXIST_IN_COMMUNITY) for a moderation of a
+ * comment the board has no record of. A purge deletes the record, so a purge of a comment already
+ * purged gets it.
+ */
+const NO_COMMENT_TO_MODERATE = 'The parent of this publication does not exist within the community\'s records'
 
 describe('board manager logic', () => {
   let dir: string
@@ -435,6 +454,98 @@ describe('board manager logic', () => {
       expect(loadState(join(boardDir, 'state.json')).archivedThreads['QmArchived']).toBeUndefined()
 
       await boardManager.stop()
+    })
+
+    it('keeps tracking a thread whose purge the board rejected, and purges it again later', async () => {
+      const { instance, publishedModerations, mockSub } = createQuietBoard()
+      seedArchivedThread(60) // expired, so the startup update purges it
+      const statePath = join(boardDir, 'state.json')
+
+      const boardManager = await startBoardManager({
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
+        boardDir,
+        archivePurgeSeconds: 1,
+        purgeSweepIntervalMs: 0,
+      })
+      await vi.waitFor(() => {
+        expect(loadState(statePath).archivedThreads['QmArchived']).toBeUndefined()
+      })
+
+      rejectModeration(instance, 0, 'not a moderator')
+      // Back in state, so its retention still runs out and it is not left in the archive for good
+      expect(loadState(statePath).archivedThreads['QmArchived']).toBeDefined()
+
+      mockSub._triggerUpdate()
+      await vi.waitFor(() => {
+        expect(publishedModerations).toHaveLength(2)
+      })
+      await boardManager.stop()
+
+      expect(publishedModerations.map((m) => [m.commentCid, m.commentModeration.purged])).toEqual([
+        ['QmArchived', true],
+        ['QmArchived', true],
+      ])
+      expect(loadState(statePath).archivedThreads['QmArchived']).toBeUndefined()
+    })
+
+    it('stops tracking a thread whose purge the board rejected because it was already purged', async () => {
+      const { instance, publishedModerations, mockSub } = createQuietBoard()
+      seedArchivedThread(60) // expired, so the startup update purges it
+      const statePath = join(boardDir, 'state.json')
+
+      const boardManager = await startBoardManager({
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
+        boardDir,
+        archivePurgeSeconds: 1,
+        purgeSweepIntervalMs: 0,
+      })
+      await vi.waitFor(() => {
+        expect(loadState(statePath).archivedThreads['QmArchived']).toBeUndefined()
+      })
+
+      // e.g. a moderator purged it from the archive by hand, or this manager purged it before a
+      // crash lost the state save: there is nothing left to purge, so the purge is done
+      rejectModeration(instance, 0, NO_COMMENT_TO_MODERATE)
+      expect(loadState(statePath).archivedThreads['QmArchived']).toBeUndefined()
+
+      mockSub._triggerUpdate()
+      await vi.waitFor(() => {
+        expect(mockSub.posts.getPage).toHaveBeenCalledTimes(2)
+      })
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      await boardManager.stop()
+
+      expect(publishedModerations).toHaveLength(1)
+    })
+
+    it('stops tracking a thread whose purge the board rejected as already purged before publish() returned', async () => {
+      const { instance, publishedModerations } = createQuietBoard()
+      vi.mocked(instance.createCommentModeration).mockImplementationOnce((opts) => {
+        const mod = Object.assign(new EventEmitter(), opts, {
+          publish: vi.fn().mockImplementation(async () => {
+            publishedModerations.push(opts as unknown as MockModerationRecord)
+            mod.emit('challengeverification', { challengeSuccess: false, reason: NO_COMMENT_TO_MODERATE })
+          }),
+        })
+        return mod as unknown as ReturnType<PKCInstance['createCommentModeration']>
+      })
+      seedArchivedThread(60)
+
+      const boardManager = await startBoardManager({
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
+        boardDir,
+        archivePurgeSeconds: 1,
+        purgeSweepIntervalMs: 0,
+      })
+      await vi.waitFor(() => {
+        expect(publishedModerations).toHaveLength(1)
+      })
+      await boardManager.stop()
+
+      expect(loadState(join(boardDir, 'state.json')).archivedThreads).toEqual({})
     })
 
     it('leaves archived threads alone until their retention expires', async () => {
@@ -1226,6 +1337,45 @@ describe('board manager logic', () => {
       expect(publishedModerations[0].commentCid).toBe('QmOverflow')
     })
 
+    // pkc-js applies an edit to the board's settings at once but regenerates its pages in a later
+    // publish cycle. A manager started in between (another `board edit`, `defaults set`, a daemon
+    // restart) finds the limit already set, so only a hold kept from the edit stops it archiving
+    // by pages still sorted with the old limit.
+    it('keeps holding capacity archiving across a restart before the board publishes the new pages', async () => {
+      const editedAt = Math.floor(Date.now() / 1000)
+      const first = createMockPKC()
+      const { mockSub: firstSub, boardManagerPromise: firstPromise } = startLocalBoard(first.instance, settingsWithSort({ bumpLimit: '300' }), 500)
+      Object.assign(firstSub, { updatedAt: editedAt })
+      const firstManager = await firstPromise
+      await vi.waitFor(() => {
+        expect(firstSub.edit).toHaveBeenCalledOnce()
+      })
+      await firstManager.stop()
+
+      const second = createMockPKC()
+      const { mockSub, boardManagerPromise } = startLocalBoard(second.instance, settingsWithSort({ bumpLimit: '500' }), 500)
+      // The record current at the edit: settings with the new limit, pages sorted by the old one
+      Object.assign(mockSub, { updatedAt: editedAt })
+      const boardManager = await boardManagerPromise
+      mockSub._triggerUpdate()
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(second.publishedModerations).toHaveLength(0)
+      expect(mockSub.edit).not.toHaveBeenCalled()
+
+      // A record generated after the edit
+      Object.assign(mockSub, { updatedAt: editedAt + 60 })
+      mockSub._triggerUpdate()
+      await vi.waitFor(() => {
+        expect(second.publishedModerations).toHaveLength(1)
+      })
+      await boardManager.stop()
+
+      expect(first.publishedModerations).toHaveLength(0)
+      expect(second.publishedModerations[0].commentCid).toBe('QmOverflow')
+      // Released for good: the next start archives on its first update again
+      expect(loadState(join(boardDir, 'state.json')).holdArchivingUntilUpdatedAt).toBeUndefined()
+    })
+
     it('does not hold archiving when the sort already had the configured limit', async () => {
       const { instance, publishedModerations } = createMockPKC()
       const { mockSub, boardManagerPromise } = startLocalBoard(instance, settingsWithSort({ bumpLimit: '500' }), 500)
@@ -1476,6 +1626,163 @@ describe('board manager logic', () => {
     })
   })
 
+  // `5chan board remove` deletes boards/<address>/ while the daemon still runs that board's
+  // manager; the next config reload stops it. A state write after the removal must not bring
+  // the directory back: without its config.json, every later loadConfig() throws on it.
+  describe('board directory removed while running', () => {
+    it('does not recreate the board directory when stopped after it was removed', async () => {
+      const { instance } = createMockPKC()
+      const mockSub = createMockCommunity({ pageCids: {}, pages: {} })
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
+      writeFileSync(join(boardDir, 'config.json'), JSON.stringify({ address: 'board.bso' }))
+
+      const boardManager = await startBoardManager({
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
+        boardDir,
+      })
+      rmSync(boardDir, { recursive: true })
+
+      await boardManager.stop()
+
+      expect(existsSync(boardDir)).toBe(false)
+      expect(loadConfig(dir).boards).toEqual([])
+      // The rest of the teardown still ran
+      expect(mockSub.stop).toHaveBeenCalledOnce()
+      expect(instance.destroy).toHaveBeenCalledOnce()
+    })
+
+    it('does not recreate the board directory when a moderation lands after it was removed', async () => {
+      const { instance, publishStarts, publishedModerations } = createMockPKC(300)
+      const mockSub = createMockCommunity({
+        pageCids: {},
+        pages: { active: { comments: [mockThread('QmKeep'), mockThread('QmOverflow')], nextCid: undefined } as Page },
+      })
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
+
+      const boardManager = await startBoardManager({
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
+        boardDir,
+        perPage: 1,
+        pages: 1,
+        purgeSweepIntervalMs: 0,
+      })
+      await vi.waitFor(() => {
+        expect(publishStarts).toHaveLength(1)
+      })
+      rmSync(boardDir, { recursive: true })
+
+      await vi.waitFor(() => {
+        expect(publishedModerations).toHaveLength(1)
+      })
+      await boardManager.stop()
+
+      expect(existsSync(boardDir)).toBe(false)
+    })
+
+    it('still reports a final save that failed for another reason, after releasing the lock and the RPC client', async () => {
+      const { instance } = createMockPKC()
+      const mockSub = createMockCommunity({ pageCids: {}, pages: {} })
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
+      const onRpcDisconnect = vi.fn()
+      const statePath = join(boardDir, 'state.json')
+
+      const boardManager = await startBoardManager({
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
+        boardDir,
+        onRpcDisconnect,
+      })
+      // The board directory is still there, but a directory in the way of state.json makes the
+      // save fail with EISDIR instead of ENOENT
+      rmSync(statePath)
+      mkdirSync(join(statePath, 'blocker'), { recursive: true })
+
+      await expect(boardManager.stop()).rejects.toMatchObject({ code: 'EISDIR' })
+
+      expect(existsSync(`${statePath}.lock`)).toBe(false)
+      expect(mockSub.stop).toHaveBeenCalledOnce()
+      expect(instance.destroy).toHaveBeenCalledOnce()
+      expect(onRpcDisconnect).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('moderations the board rejects', () => {
+    it('forgets an archive the board rejected and archives the thread again on the next update', async () => {
+      const { instance, publishedModerations } = createMockPKC()
+      const mockSub = createMockCommunity({
+        pageCids: {},
+        pages: { active: { comments: [mockThread('QmKeep'), mockThread('QmOverflow')], nextCid: undefined } as Page },
+      })
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
+      const statePath = join(boardDir, 'state.json')
+
+      const boardManager = await startBoardManager({
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
+        boardDir,
+        perPage: 1,
+        pages: 1,
+        purgeSweepIntervalMs: 0,
+      })
+      await vi.waitFor(() => {
+        expect(loadState(statePath).archivedThreads['QmOverflow']).toBeDefined()
+      })
+
+      // e.g. the signer lost its moderator role after the startup check
+      rejectModeration(instance, 0, 'not a moderator')
+      expect(loadState(statePath).archivedThreads['QmOverflow']).toBeUndefined()
+
+      // The board still lists the thread unarchived, so it is archived again instead of being
+      // left open past capacity and purged later as if it had spent its time in the archive
+      mockSub._triggerUpdate()
+      await vi.waitFor(() => {
+        expect(publishedModerations).toHaveLength(2)
+      })
+      await boardManager.stop()
+
+      expect(publishedModerations.map((m) => [m.commentCid, m.commentModeration.archived])).toEqual([
+        ['QmOverflow', true],
+        ['QmOverflow', true],
+      ])
+      expect(loadState(statePath).archivedThreads['QmOverflow']).toBeDefined()
+    })
+
+    it('does not record an archive the board rejected before publish() returned', async () => {
+      const { instance, publishedModerations } = createMockPKC()
+      vi.mocked(instance.createCommentModeration).mockImplementationOnce((opts) => {
+        const mod = Object.assign(new EventEmitter(), opts, {
+          publish: vi.fn().mockImplementation(async () => {
+            publishedModerations.push(opts as unknown as MockModerationRecord)
+            mod.emit('challengeverification', { challengeSuccess: false, reason: 'not a moderator' })
+          }),
+        })
+        return mod as unknown as ReturnType<PKCInstance['createCommentModeration']>
+      })
+      const mockSub = createMockCommunity({
+        pageCids: {},
+        pages: { active: { comments: [mockThread('QmKeep'), mockThread('QmOverflow')], nextCid: undefined } as Page },
+      })
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
+
+      const boardManager = await startBoardManager({
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
+        boardDir,
+        perPage: 1,
+        pages: 1,
+        purgeSweepIntervalMs: 0,
+      })
+      await vi.waitFor(() => {
+        expect(publishedModerations).toHaveLength(1)
+      })
+      await boardManager.stop()
+
+      expect(loadState(join(boardDir, 'state.json')).archivedThreads).toEqual({})
+    })
+  })
+
   describe('deleted comment purging', () => {
     it('purges a deleted top-level thread', async () => {
       const { instance, publishedModerations } = createMockPKC()
@@ -1616,6 +1923,38 @@ describe('board manager logic', () => {
       const loaded = loadState(statePath)
       expect(loaded.archivedThreads['QmArchived']).toBeUndefined()
       await boardManager.stop()
+    })
+
+    it('does not track an archived thread again when its purge is rejected because it was already purged', async () => {
+      const { instance, publishedModerations } = createMockPKC()
+      const getPage = vi.fn().mockResolvedValue({
+        comments: [mockThread('QmArchived', { deleted: true })],
+        nextCid: undefined,
+      } as Page)
+      const mockSub = createMockCommunity({ pageCids: { active: 'QmPage1' }, pages: {}, getPage })
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
+      const statePath = join(boardDir, 'state.json')
+      saveState(statePath, {
+        signers: {},
+        archivedThreads: { 'QmArchived': { archivedTimestamp: Math.floor(Date.now() / 1000) } },
+      })
+
+      const boardManager = await startBoardManager({
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
+        boardDir: boardDir,
+        purgeSweepIntervalMs: 0,
+      })
+      await vi.waitFor(() => {
+        expect(publishedModerations).toHaveLength(1)
+      })
+
+      // Tracked again, its retention would run out and purge it, be rejected the same way and
+      // track it again, on every sweep for good
+      rejectModeration(instance, 0, NO_COMMENT_TO_MODERATE)
+      await boardManager.stop()
+
+      expect(loadState(statePath).archivedThreads['QmArchived']).toBeUndefined()
     })
 
     it('purges deleted pinned threads', async () => {
@@ -1918,6 +2257,29 @@ describe('board manager logic', () => {
       await boardManager.stop()
 
       expect(publishedModerations.map((m) => [m.commentCid, m.commentModeration.purged ?? false])).toEqual([
+        ['QmOverflow', true],
+      ])
+    })
+
+    it('purges a thread again on the next update when the board rejected its purge', async () => {
+      const { instance, publishedModerations } = createMockPKC()
+      const threads = [mockThread('QmKeep'), mockThread('QmOverflow')]
+      const getPage = vi.fn().mockResolvedValue({ comments: threads, nextCid: undefined } as Page)
+
+      const { boardManager, mockSub } = await startNoArchiveBoard(instance, getPage, { perPage: 1, pages: 1 })
+
+      await vi.waitFor(() => {
+        expect(publishedModerations).toHaveLength(1)
+      })
+      rejectModeration(instance, 0, 'not a moderator')
+      mockSub._triggerUpdate()
+      await vi.waitFor(() => {
+        expect(publishedModerations).toHaveLength(2)
+      })
+      await boardManager.stop()
+
+      expect(publishedModerations.map((m) => [m.commentCid, m.commentModeration.purged ?? false])).toEqual([
+        ['QmOverflow', true],
         ['QmOverflow', true],
       ])
     })

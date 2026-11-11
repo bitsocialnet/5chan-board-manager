@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { startBoardManager } from '../src/board-manager.js'
+import { saveState } from '../src/state.js'
 import type { PKCInstance, BoardManagerResult, Community } from '../src/types.js'
 import {
   RPC_URL,
@@ -7,6 +8,7 @@ import {
   createTestCommunity,
   publishThread,
   publishReply,
+  purgeAsModerator,
   waitForThreadInPages,
   waitForThreadArchived,
   waitForThreadPinned,
@@ -382,6 +384,50 @@ describe('board manager E2E', () => {
         // Verify T1 removed from state (purged)
         const stateAfterPurge = readStateFile(statePath)
         expect(stateAfterPurge.archivedThreads[t1.cid]).toBeUndefined()
+      } finally {
+        if (boardManager) await boardManager.stop()
+        await sub.stop()
+        cleanupTempDir(dir)
+      }
+    })
+
+    it('stops tracking an archived thread that a moderator already purged by hand', async () => {
+      const { sub, address } = await createTestCommunity(pkc)
+      const { dir, statePath } = createTempStateDir()
+      let boardManager: BoardManagerResult | undefined
+
+      try {
+        const t1 = await publishThread(pkc, address, 'Purged By Hand')
+        await waitForThreadInPages(sub, t1.cid)
+
+        // The board manager archived T1 earlier, then a moderator purged it from the archive by hand
+        const modSigner = await pkc.createSigner()
+        await sub.edit({
+          roles: { ...sub.roles, [modSigner.address]: { role: 'moderator' } },
+        })
+        await purgeAsModerator(pkc, address, t1.cid, modSigner)
+        saveState(statePath, {
+          signers: {},
+          archivedThreads: { [t1.cid]: { archivedTimestamp: Math.floor(Date.now() / 1000) - 60 } },
+        })
+
+        // T1's retention has run out, so the first sweep purges it. The board rejects that purge
+        // because it has no record of T1 any more.
+        boardManager = await startBoardManager({
+          communityAddress: address,
+          pkcRpcUrl: RPC_URL,
+          boardDir: dir,
+          archivePurgeSeconds: 1,
+          purgeSweepIntervalMs: 2_000,
+        })
+        await waitForPurgedFromState(statePath, t1.cid, 60_000)
+
+        // A purge the board rejected for any other reason is tracked again and retried on the next
+        // sweep. This one is done, so T1 stays untracked across several sweeps.
+        for (let i = 0; i < 24; i++) {
+          await new Promise((resolve) => setTimeout(resolve, 250))
+          expect(readStateFile(statePath).archivedThreads[t1.cid]).toBeUndefined()
+        }
       } finally {
         if (boardManager) await boardManager.stop()
         await sub.stop()
