@@ -251,7 +251,9 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
       if (!published) return
       log.error(`${communityAddress} rejected ${action}: ${rejection}`)
       undo()
-      // Once stopped, the lock is released or about to be: stop()'s own save covers the undo, if any
+      // Once stopped, stop() saves once more and then releases the lock. A verdict that arrives
+      // before that save is covered by it. One that arrives later, while the RPC client is torn
+      // down, is lost like a verdict that never arrives, and the moderation stays recorded.
       if (stopped) return
       try {
         saveState(statePath, state)
