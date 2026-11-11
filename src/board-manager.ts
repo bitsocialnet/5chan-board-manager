@@ -743,12 +743,18 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
       // can queue new work at this point: the timer is cleared, the listener is
       // removed, and both paths bail on `stopped`.
       await workLock
+      // The lock and the RPC client must be released even when this save fails
+      let finalSaveError: unknown
       try {
         saveState(statePath, state)
       } catch (err) {
-        // ENOENT: `5chan board remove` deleted the board directory, and this stop is the reload
-        // that follows. The lock and the RPC client must still be released either way.
-        log.error(`failed to save state for ${communityAddress}: ${err}`)
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+          // `5chan board remove` deleted the board directory, and this stop is the reload that
+          // follows: there is no board left to save state for
+          log(`board directory for ${communityAddress} is gone, not saving its state`)
+        } else {
+          finalSaveError = err
+        }
       }
       await fileLock.release()
       let teardownTimer: NodeJS.Timeout | undefined
@@ -767,11 +773,13 @@ export async function startBoardManager(options: BoardManagerOptions): Promise<B
         ])
       } catch (error) {
         options.onRpcDisconnect?.()
+        if (finalSaveError !== undefined) log.error(`failed to save state for ${communityAddress}: ${finalSaveError}`)
         throw error
       } finally {
         clearTimeout(teardownTimer)
         unwatchRpc()
       }
+      if (finalSaveError !== undefined) throw finalSaveError
       log(`board manager stopped for ${communityAddress}`)
     },
   }

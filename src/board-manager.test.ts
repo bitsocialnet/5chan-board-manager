@@ -1680,6 +1680,32 @@ describe('board manager logic', () => {
 
       expect(existsSync(boardDir)).toBe(false)
     })
+
+    it('still reports a final save that failed for another reason, after releasing the lock and the RPC client', async () => {
+      const { instance } = createMockPKC()
+      const mockSub = createMockCommunity({ pageCids: {}, pages: {} })
+      vi.mocked(instance.getCommunity).mockResolvedValue(mockSub as unknown as Awaited<ReturnType<PKCInstance['getCommunity']>>)
+      const onRpcDisconnect = vi.fn()
+      const statePath = join(boardDir, 'state.json')
+
+      const boardManager = await startBoardManager({
+        communityAddress: 'board.bso',
+        pkcRpcUrl: 'ws://localhost:9138',
+        boardDir,
+        onRpcDisconnect,
+      })
+      // The board directory is still there, but a directory in the way of state.json makes the
+      // save fail with EISDIR instead of ENOENT
+      rmSync(statePath)
+      mkdirSync(join(statePath, 'blocker'), { recursive: true })
+
+      await expect(boardManager.stop()).rejects.toMatchObject({ code: 'EISDIR' })
+
+      expect(existsSync(`${statePath}.lock`)).toBe(false)
+      expect(mockSub.stop).toHaveBeenCalledOnce()
+      expect(instance.destroy).toHaveBeenCalledOnce()
+      expect(onRpcDisconnect).not.toHaveBeenCalled()
+    })
   })
 
   describe('moderations the board rejects', () => {
