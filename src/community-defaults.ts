@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import stripJsonComments from 'strip-json-comments'
 import { z } from 'zod'
+import { archivingHoldAfterSortEdit } from './page-sorts.js'
 import type { Community } from './types.js'
 
 type CommunityEditOptions = Parameters<Community['edit']>[0]
@@ -44,6 +45,11 @@ export type BoardManagerDefaults = z.infer<typeof BoardManagerSettingsSchema>
 export interface ApplyCommunityDefaultsResult {
   applied: boolean
   changedFields: string[]
+  /**
+   * Set when the edit changed the board's post sorts: the `updatedAt` a board record must pass
+   * before its pages are sorted by the new settings (see archivingHoldAfterSortEdit)
+   */
+  holdArchivingUntilUpdatedAt?: number
 }
 
 const COMMUNITY_DEFAULTS_PRESET_PATH = fileURLToPath(
@@ -293,9 +299,14 @@ export async function applyCommunityDefaultsToBoard(
       return { applied: false, changedFields: [] }
     }
 
+    // Read before the edit, which updates `community`
+    const updatedAtBeforeEdit = community.updatedAt ?? 0
+    const postSortsChanged = patch.settings !== undefined
+      && JSON.stringify(patch.settings.pages?.posts) !== JSON.stringify(community.settings?.pages?.posts)
     await community.edit(patch)
 
-    return { applied: true, changedFields }
+    if (!postSortsChanged) return { applied: true, changedFields }
+    return { applied: true, changedFields, holdArchivingUntilUpdatedAt: archivingHoldAfterSortEdit(updatedAtBeforeEdit) }
   } finally {
     await pkc.destroy()
   }

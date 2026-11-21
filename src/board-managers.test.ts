@@ -545,4 +545,97 @@ describe('startBoardManagers', () => {
       await manager.stop()
     })
   })
+
+  // A board can fail to start for a reason fixed outside its config, e.g. a remote board whose
+  // owner has not yet made the manager's signer a moderator. Nothing in the config changes when
+  // the owner does, so the reconcile loop has to retry the board by itself.
+  describe('retrying boards that failed to start', () => {
+    const realNow = Date.now.bind(Date)
+    let clockOffsetMs = 0
+    let dateNowSpy: ReturnType<typeof vi.spyOn> | undefined
+
+    beforeEach(() => {
+      clockOffsetMs = 0
+      dateNowSpy = vi.spyOn(Date, 'now').mockImplementation(() => realNow() + clockOffsetMs)
+    })
+
+    afterEach(() => {
+      dateNowSpy?.mockRestore()
+    })
+
+    // Long enough for at least one 2s reconcile pass
+    const reconcilePass = () => new Promise((resolve) => setTimeout(resolve, 2_500))
+
+    async function startWithFailedBoard() {
+      mockStartBoardManager
+        .mockRejectedValueOnce(new Error('Signer does not have a moderator role on remote community a.bso'))
+        .mockResolvedValueOnce({ stop: makeStopFn() })
+
+      const dir = tmpDir()
+      writeBoardConfig(dir, { address: 'a.bso' })
+      writeBoardConfig(dir, { address: 'b.bso' })
+      const manager = await startBoardManagers(dir, { boards: [{ address: 'a.bso' }, { address: 'b.bso' }] })
+      expect(manager.errors.has('a.bso')).toBe(true)
+      expect(manager.boardManagers.has('b.bso')).toBe(true)
+      return { manager, dir }
+    }
+
+    it('starts a board that failed to start once it can, without a config change', async () => {
+      const { manager } = await startWithFailedBoard()
+      const stopA = makeStopFn()
+      mockStartBoardManager.mockResolvedValueOnce({ stop: stopA })
+
+      clockOffsetMs = 31_000
+      await waitForReload(() => {
+        expect(manager.boardManagers.has('a.bso')).toBe(true)
+      })
+      expect(manager.errors.has('a.bso')).toBe(false)
+      expect(mockStartBoardManager).toHaveBeenCalledTimes(3)
+      expect(mockStartBoardManager.mock.calls[2][0].communityAddress).toBe('a.bso')
+
+      await manager.stop()
+      expect(stopA).toHaveBeenCalledOnce()
+    })
+
+    it('waits before retrying, and backs off while the board keeps failing', async () => {
+      const { manager } = await startWithFailedBoard()
+      mockStartBoardManager.mockRejectedValueOnce(new Error('still not a moderator'))
+
+      // First retry 30s after the failure
+      await reconcilePass()
+      expect(mockStartBoardManager).toHaveBeenCalledTimes(2)
+      clockOffsetMs = 31_000
+      await waitForReload(() => {
+        expect(mockStartBoardManager).toHaveBeenCalledTimes(3)
+        expect(manager.errors.get('a.bso')?.message).toBe('still not a moderator')
+      })
+
+      // The next one 60s after that
+      clockOffsetMs = 31_000 + 45_000
+      await reconcilePass()
+      expect(mockStartBoardManager).toHaveBeenCalledTimes(3)
+      mockStartBoardManager.mockResolvedValueOnce({ stop: makeStopFn() })
+      clockOffsetMs = 31_000 + 61_000
+      await waitForReload(() => {
+        expect(manager.boardManagers.has('a.bso')).toBe(true)
+      })
+      expect(mockStartBoardManager).toHaveBeenCalledTimes(4)
+
+      await manager.stop()
+    })
+
+    it('does not retry a failed board once it is removed from the config', async () => {
+      const { manager, dir } = await startWithFailedBoard()
+
+      rmSync(join(dir, 'boards', 'a.bso'), { recursive: true })
+      await waitForReload(() => {
+        expect(manager.errors.has('a.bso')).toBe(false)
+      })
+      clockOffsetMs = 31_000
+      await reconcilePass()
+      expect(mockStartBoardManager).toHaveBeenCalledTimes(2)
+
+      await manager.stop()
+    })
+  })
 })

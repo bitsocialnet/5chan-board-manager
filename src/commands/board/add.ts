@@ -1,6 +1,9 @@
 import { Args, Command, Flags } from '@oclif/core'
+import { mkdirSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline/promises'
-import { loadConfig, saveBoardConfig } from '../../config-manager.js'
+import { boardDir, loadConfig, saveBoardConfig } from '../../config-manager.js'
+import { loadState, saveState } from '../../state.js'
 import { validateBoardAddress } from '../../board-validator.js'
 import { isNonExistentFlagsError } from '../../parse-utils.js'
 import {
@@ -269,6 +272,7 @@ https://github.com/bitsocialnet/bitsocial-cli#bitsocial-community-edit-address`
     }
 
     for (const address of addresses) {
+      let holdArchivingUntilUpdatedAt: number | undefined
       if (preset) {
         // Resolved the same way the board manager will resolve it from the saved config
         const bumpLimit = flags['bump-limit']
@@ -280,6 +284,7 @@ https://github.com/bitsocialnet/bitsocial-cli#bitsocial-community-edit-address`
           flags['rpc-url'],
           withPresetBumpLimit(preset, bumpLimit),
         )
+        holdArchivingUntilUpdatedAt = applyResult.holdArchivingUntilUpdatedAt
         if (applyResult.applied) {
           this.log(
             `Applied board settings defaults (${applyResult.changedFields.join(', ')}) to "${address}"`,
@@ -309,6 +314,14 @@ https://github.com/bitsocialnet/bitsocial-cli#bitsocial-community-edit-address`
       if (flags['bump-limit'] !== undefined) board.bumpLimit = flags['bump-limit']
       if (flags['archive-purge-seconds'] !== undefined) board.archivePurgeSeconds = flags['archive-purge-seconds']
 
+      if (holdArchivingUntilUpdatedAt !== undefined) {
+        // The board's pages stay sorted by its old settings until it publishes again, and the
+        // board manager the daemon starts for it finds the sort already set, so only this hold
+        // keeps it from archiving by them. Written before config.json, which is what starts it.
+        const statePath = join(boardDir(configDir, address), 'state.json')
+        mkdirSync(dirname(statePath), { recursive: true })
+        saveState(statePath, { ...loadState(statePath), holdArchivingUntilUpdatedAt })
+      }
       saveBoardConfig(configDir, board)
 
       this.log(`Added board "${address}" to ${configDir}`)

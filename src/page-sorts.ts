@@ -46,6 +46,19 @@ export function withActivePageSortBumpLimit<T extends CommunitySettings>(
 }
 
 /**
+ * The `updatedAt` a board record must pass to have been generated after an edit to the board's
+ * post sorts that just returned. pkc-js applies the edit at once but regenerates the pages in a
+ * later publish cycle, so until then they are still sorted by the old settings and capacity
+ * archiving waits (`BoardManagerState.holdArchivingUntilUpdatedAt`). `updatedAt` is not
+ * wall-clock time (it stays strictly increasing, so rapid publishes run it ahead of the clock).
+ * Publish cycles do not overlap, so a record stamped past both the record current at the edit
+ * and the edit's own second, plus one for a cycle already in flight, was generated after the edit.
+ */
+export function archivingHoldAfterSortEdit(updatedAtBeforeEdit: number): number {
+  return Math.max(updatedAtBeforeEdit, Math.floor(Date.now() / 1000)) + 1
+}
+
+/**
  * Return the preset with its `@pkcprotocol/active-page-sort` entry carrying the
  * board's bump limit, so applying it writes the board's own limit the first time
  * instead of the preset's literal value (each `settings.pages` change regenerates

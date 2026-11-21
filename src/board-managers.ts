@@ -9,6 +9,15 @@ import type { BoardManagerResult, MultiBoardConfig } from './types.js'
 
 const log = Logger('bitsocial:5chan-board-manager')
 
+/**
+ * A board whose manager failed to start is retried by the reconcile loop, first after this
+ * delay, doubling after each failed retry up to START_RETRY_MAX_MS. The cause is often fixed
+ * outside the config (a remote board's owner makes the signer a moderator, a stale state lock
+ * expires), so nothing else would ever start the board again before a daemon restart.
+ */
+const START_RETRY_BASE_MS = 30_000
+const START_RETRY_MAX_MS = 10 * 60_000
+
 export interface BoardManagers {
   readonly boardManagers: ReadonlyMap<string, BoardManagerResult>
   readonly errors: ReadonlyMap<string, Error>
@@ -29,7 +38,7 @@ export interface BoardManagersRuntimeOptions {
  * Start board managers that watch the config directory for changes.
  * Watches both boards/ directory and global.json for hot-reload.
  * On config change, diffs the old and new config, stops removed board managers,
- * and starts added board managers.
+ * and starts added board managers. Boards that failed to start are retried with backoff.
  */
 export async function startBoardManagers(
   configDir: string,
@@ -38,10 +47,26 @@ export async function startBoardManagers(
 ): Promise<BoardManagers> {
   const boardManagers = new Map<string, BoardManagerResult>()
   const errors = new Map<string, Error>()
+  /** Boards in `errors`, with how many starts failed in a row and when to try again. */
+  const startRetries = new Map<string, { failures: number; retryAt: number }>()
   let currentConfig = initialConfig
   let reloading = false
   let reloadPending = false
   let stopped = false
+
+  function recordStartFailure(address: string, err: unknown): void {
+    const error = err instanceof Error ? err : new Error(String(err))
+    const failures = (startRetries.get(address)?.failures ?? 0) + 1
+    const retryDelayMs = Math.min(START_RETRY_BASE_MS * 2 ** (failures - 1), START_RETRY_MAX_MS)
+    startRetries.set(address, { failures, retryAt: Date.now() + retryDelayMs })
+    log.error(`failed to start board manager for ${address}: ${error.message} (retrying in ${retryDelayMs / 1000}s)`)
+    errors.set(address, error)
+  }
+
+  function forgetStartFailure(address: string): void {
+    errors.delete(address)
+    startRetries.delete(address)
+  }
 
   function onAddressChange(oldAddress: string, newAddress: string): void {
     // Update boardManagers map key
@@ -83,9 +108,7 @@ export async function startBoardManagers(
       const result = await startBoardManager({ ...options, ...runtimeOptions, onAddressChange })
       boardManagers.set(board.address, result)
     } catch (err) {
-      const error = err instanceof Error ? err : new Error(String(err))
-      log.error(`failed to start board manager for ${board.address}: ${error.message}`)
-      errors.set(board.address, error)
+      recordStartFailure(board.address, err)
     }
   }
 
@@ -130,6 +153,7 @@ export async function startBoardManagers(
 
     if (added.length === 0 && removed.length === 0 && changed.length === 0) {
       currentConfig = newConfig
+      await retryFailedBoards(newConfig)
       return
     }
 
@@ -145,7 +169,7 @@ export async function startBoardManagers(
         }
         boardManagers.delete(address)
       }
-      errors.delete(address)
+      forgetStartFailure(address)
     }
 
     // Restart changed board managers
@@ -160,7 +184,7 @@ export async function startBoardManagers(
         }
         boardManagers.delete(board.address)
       }
-      errors.delete(board.address)
+      forgetStartFailure(board.address)
 
       const options = resolveBoardManagerOptions(board, newConfig, configDir)
       try {
@@ -168,9 +192,7 @@ export async function startBoardManagers(
         const result = await startBoardManager({ ...options, ...runtimeOptions, onAddressChange })
         boardManagers.set(board.address, result)
       } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err))
-        log.error(`failed to start board manager for ${board.address}: ${error.message}`)
-        errors.set(board.address, error)
+        recordStartFailure(board.address, err)
       }
     }
 
@@ -181,11 +203,9 @@ export async function startBoardManagers(
         log(`starting board manager for added board ${board.address}`)
         const result = await startBoardManager({ ...options, ...runtimeOptions, onAddressChange })
         boardManagers.set(board.address, result)
-        errors.delete(board.address)
+        forgetStartFailure(board.address)
       } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err))
-        log.error(`failed to start board manager for ${board.address}: ${error.message}`)
-        errors.set(board.address, error)
+        recordStartFailure(board.address, err)
       }
     }
 
@@ -193,6 +213,28 @@ export async function startBoardManagers(
 
     if (added.length > 0 || removed.length > 0 || changed.length > 0) {
       log(`config reloaded: +${added.length} added, -${removed.length} removed, ~${changed.length} changed, ${boardManagers.size} running`)
+    }
+
+    await retryFailedBoards(newConfig)
+  }
+
+  /** Start again each configured board whose last start failed and whose retry delay is over. */
+  async function retryFailedBoards(config: MultiBoardConfig): Promise<void> {
+    for (const board of config.boards) {
+      if (stopped) return
+      const retry = startRetries.get(board.address)
+      if (!retry || Date.now() < retry.retryAt || boardManagers.has(board.address)) continue
+
+      const options = resolveBoardManagerOptions(board, config, configDir)
+      try {
+        log(`retrying board manager for ${board.address} after ${retry.failures} failed start(s)`)
+        const result = await startBoardManager({ ...options, ...runtimeOptions, onAddressChange })
+        boardManagers.set(board.address, result)
+        forgetStartFailure(board.address)
+        log(`board manager for ${board.address} started on retry, ${boardManagers.size} running`)
+      } catch (err) {
+        recordStartFailure(board.address, err)
+      }
     }
   }
 

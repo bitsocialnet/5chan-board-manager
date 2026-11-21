@@ -33,6 +33,7 @@ import {
 } from '../../community-defaults.js'
 import type { CommunityDefaultsPreset } from '../../community-defaults.js'
 import { loadConfig, saveGlobalConfig } from '../../config-manager.js'
+import { loadState } from '../../state.js'
 import BoardAdd from './add.js'
 
 const mockValidate = vi.mocked(validateBoardAddress)
@@ -318,6 +319,26 @@ describe('board add command', () => {
       await runCommand(['board.bso', '--apply-defaults'], dir, { interactive: false })
 
       expect(appliedSortOptions()).toEqual({ noBumpKeywords: 'sage', bumpLimit: '400' })
+    })
+
+    // The board's pages stay sorted by its old settings until it publishes again. The board
+    // manager the daemon starts for the new board finds the sort already set, so only a hold in
+    // its state.json keeps it from archiving by those pages.
+    it('holds the new board\'s capacity archiving when applying the defaults changed its post sorts', async () => {
+      const dir = tmpDir()
+      mockGetPreset.mockResolvedValue(presetWithSort(300))
+      mockApplyDefaults.mockResolvedValue({ applied: true, changedFields: ['settings'], holdArchivingUntilUpdatedAt: 1_800_000_000 })
+      await runCommand(['board.bso', '--apply-defaults'], dir, { interactive: false })
+
+      expect(loadState(join(dir, 'boards', 'board.bso', 'state.json')).holdArchivingUntilUpdatedAt).toBe(1_800_000_000)
+      expect(loadConfig(dir).boards).toEqual([{ address: 'board.bso', bumpLimit: 300 }])
+    })
+
+    it('writes no state when applying the defaults left the post sorts as they were', async () => {
+      const dir = tmpDir()
+      await runCommand(['board.bso', '--apply-defaults'], dir, { interactive: false })
+
+      expect(existsSync(join(dir, 'boards', 'board.bso', 'state.json'))).toBe(false)
     })
   })
 
