@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.37](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.36...v0.2.37) (2026-11-26)
+
+### Bug Fixes
+
+* **deps:** upgrade @pkcprotocol/pkc-js 0.0.132 -> 0.0.163 ([#29](https://github.com/bitsocialnet/5chan-board-manager/issues/29)) ([2893004](https://github.com/bitsocialnet/5chan-board-manager/commit/28930040f70684918422822a5e82451090f00db2))
+
 ## [0.2.36](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.35...v0.2.36) (2026-10-31)
 
 ## [0.2.35](https://github.com/bitsocialnet/5chan-board-manager/compare/v0.2.34...v0.2.35) (2026-10-30)
